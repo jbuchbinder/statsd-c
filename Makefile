@@ -50,5 +50,5 @@ $(BINARY): $(OBJECTS)
 
 test: compile
 	@echo "* $(BOLD)Running test \"$(BINARY)\" ... $(UNBOLD)"
-	./$(BINARY) -df -s state.json
+	./$(BINARY) -df -s state.json -F 5
 

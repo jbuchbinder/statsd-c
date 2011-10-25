@@ -36,10 +36,10 @@
 #define MGMT_PORT 8126
 #define GANGLIA_PORT 8649
 
-/* Define stat flush interval in ms */
-#define FLUSH_INTERVAL 10000
+/* Define stat flush interval in sec */
+#define FLUSH_INTERVAL 10
 
-#define THREAD_USLEEP(x) { pthread_mutex_t fakeMutex = PTHREAD_MUTEX_INITIALIZER; pthread_cond_t fakeCond = PTHREAD_COND_INITIALIZER; struct timespec timeToWait; struct timeval now; int rt; gettimeofday(&now,NULL); timeToWait.tv_sec = now.tv_sec + (x / 1000); timeToWait.tv_nsec = now.tv_usec * 1000; pthread_mutex_lock(&fakeMutex); rt = pthread_cond_timedwait(&fakeCond, &fakeMutex, &timeToWait); if (rt != 0) { } pthread_mutex_unlock(&fakeMutex); }
+#define THREAD_SLEEP(x) { pthread_mutex_t fakeMutex = PTHREAD_MUTEX_INITIALIZER; pthread_cond_t fakeCond = PTHREAD_COND_INITIALIZER; struct timespec timeToWait; struct timeval now; int rt; gettimeofday(&now,NULL); timeToWait.tv_sec = now.tv_sec + x; timeToWait.tv_nsec = now.tv_usec; pthread_mutex_lock(&fakeMutex); rt = pthread_cond_timedwait(&fakeCond, &fakeMutex, &timeToWait); if (rt != 0) { } pthread_mutex_unlock(&fakeMutex); }
 #define STREAM_SEND(x,y) if (send(x, y, strlen(y), 0) == -1) { perror("send error"); }
 #define STREAM_SEND_LONG(x,y) { \
 	char *z = malloc(sizeof(char *)); \
@@ -82,45 +82,60 @@
  */
 
 #define SEND_GMETRIC_DOUBLE(myname, myvalue, myunit) { \
+	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
+	char *bufptr = &buf; \
 	gmetric_message_t msg; \
 	msg.type = GMETRIC_VALUE_DOUBLE; \
 	msg.name = myname; \
 	msg.value.v_double = myvalue; \
 	msg.units = myunit; \
 	msg.slope = GMETRIC_SLOPE_BOTH; \
-	msg.tmax = FLUSH_INTERVAL / 1000; \
+	msg.tmax = flush_interval; \
 	msg.dmax = 0; \
-	int len = gmetric_message_create_xdr(buf, sizeof(buf), &msg); \
+	int len = gmetric_message_create_xdr(bufptr, sizeof(buf), &msg); \
 	if (len != -1) { \
-		gmetric_send_xdr(&gm, buf, len); \
+		syslog(LOG_INFO, "Sending gmetric message length %d", len); \
+		gmetric_send_xdr(&gm, bufptr, len); \
+	} else { \
+		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
 	}
 #define SEND_GMETRIC_INT(myname, myvalue, myunit) { \
+	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
+	char *bufptr = &buf; \
 	gmetric_message_t msg; \
 	msg.type = GMETRIC_VALUE_INT; \
 	msg.name = myname; \
 	msg.value.v_double = myvalue; \
 	msg.units = myunit; \
 	msg.slope = GMETRIC_SLOPE_BOTH; \
-	msg.tmax = FLUSH_INTERVAL / 1000; \
+	msg.tmax = flush_interval; \
 	msg.dmax = 0; \
-	int len = gmetric_message_create_xdr(buf, sizeof(buf), &msg); \
+	int len = gmetric_message_create_xdr(bufptr, sizeof(buf), &msg); \
 	if (len != -1) { \
-		gmetric_send_xdr(&gm, buf, len); \
+		syslog(LOG_INFO, "Sending gmetric message length %d", len); \
+		gmetric_send_xdr(&gm, bufptr, len); \
+	} else { \
+		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
 	}
 #define SEND_GMETRIC_STRING(myname, myvalue, myunit) { \
+	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
+	char *bufptr = &buf; \
 	gmetric_message_t msg; \
 	msg.type = GMETRIC_VALUE_STRING; \
 	msg.name = myname; \
 	msg.value.v_double = myvalue; \
 	msg.units = myunit; \
 	msg.slope = GMETRIC_SLOPE_BOTH; \
-	msg.tmax = FLUSH_INTERVAL / 1000; \
+	msg.tmax = flush_interval; \
 	msg.dmax = 0; \
-	int len = gmetric_message_create_xdr(buf, sizeof(buf), &msg); \
+	int len = gmetric_message_create_xdr(bufptr, sizeof(buf), &msg); \
 	if (len != -1) { \
-		gmetric_send_xdr(gm, buf, len); \
+		syslog(LOG_INFO, "Sending metric message length %d", len); \
+		gmetric_send_xdr(&gm, bufptr, len); \
+	} else { \
+		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
 	}
 
@@ -140,8 +155,8 @@ pthread_t thread_stat;
 pthread_t thread_udp;
 pthread_t thread_mgmt;
 pthread_t thread_flush;
-int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT;
-int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0;
+int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT, flush_interval = FLUSH_INTERVAL;
+int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0, enable_gmetric = 0;
 char *serialize_file = NULL, *ganglia_host = NULL;
 
 /*
@@ -230,7 +245,7 @@ int main(int argc, char *argv[]) {
   sem_init(&timers_lock, 0, 1);
   sem_init(&counters_lock, 0, 1);
 
-  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:")) != -1) {
+  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:")) != -1) {
     switch (opt) {
       case 'd':
         printf("Debug enabled.\n");
@@ -243,6 +258,10 @@ int main(int argc, char *argv[]) {
       case 'f':
         printf("Friendly mode enabled (breaks wire compatibility).\n");
         friendly = 1;
+        break;
+      case 'F':
+        flush_interval = atoi(optarg);
+        printf("Flush interval set to %d seconds.\n", flush_interval);
         break;
       case 'p':
         port = atoi(optarg);
@@ -262,6 +281,7 @@ int main(int argc, char *argv[]) {
         break;
       case 'G':
         ganglia_host = strdup(optarg);
+        enable_gmetric = 1;
         printf("Ganglia host %s\n", ganglia_host);
         break;
       case 'g':
@@ -269,7 +289,7 @@ int main(int argc, char *argv[]) {
         printf("Ganglia port %d\n", ganglia_port);
         break;
       case 'h':
-        fprintf(stderr, "Usage: %s [-hDdfc] [-p port] [-m port] [-s file] [-G host] [-g port]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port]\n", argv[0]);
         fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
         fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
         fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
@@ -279,6 +299,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "\t-d                enable debug\n");
         fprintf(stderr, "\t-D                daemonize\n");
         fprintf(stderr, "\t-f                enable friendly mode (breaks wire compatibility)\n");
+        fprintf(stderr, "\t-F seconds        set flush interval in seconds (default 10)\n");
         fprintf(stderr, "\t-c                clear stats on startup\n");
         exit(1);
       default:
@@ -812,18 +833,17 @@ void p_thread_stat(void *ptr) {
 
 void p_thread_flush(void *ptr) {
   syslog(LOG_INFO, "Thread[Flush]: Starting thread %d\n", (int) *((int *) ptr));
+
   while (1) {
-    THREAD_USLEEP(FLUSH_INTERVAL);
+    THREAD_SLEEP(flush_interval);
 
     gmetric_t gm;
-    bool enable_gmetric = (ganglia_host != NULL);
-    char buf[GMETRIC_MAX_MESSAGE_LEN];
 
     if (enable_gmetric) {
       gmetric_create(&gm);
       if (!gmetric_open(&gm, ganglia_host, ganglia_port)) {
         syslog(LOG_ERR, "Unable to connect to ganglia host %s:%d", ganglia_host, ganglia_port);
-        enable_gmetric = false;
+        enable_gmetric = 0;
       }
     }
 
@@ -836,7 +856,7 @@ void p_thread_flush(void *ptr) {
       statsd_counter_t *s_counter, *tmp;
       wait_for_counters_lock();
       HASH_ITER(hh, counters, s_counter, tmp) {
-        long double value = s_counter->value / (FLUSH_INTERVAL / 1000);
+        long double value = s_counter->value / flush_interval;
         char *message = malloc(sizeof(char) * BUFLEN);
         sprintf(message, "stats.%s %Lf %ld\nstats_counts.%s %Lf %ld\n", s_counter->key, value, ts, s_counter->key, s_counter->value, ts);
         if (enable_gmetric) {
@@ -989,6 +1009,7 @@ void p_thread_flush(void *ptr) {
     if (ts_string) free(ts_string);
     if (statString) free(statString);
   }
+
   syslog(LOG_INFO, "Thread[Flush]: Ending thread %d\n", (int) *((int *) ptr));
   pthread_exit(0);
 }
