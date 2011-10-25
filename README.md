@@ -19,12 +19,15 @@ Build with "make".
 USAGE
 -----
 
-    Usage: statsd [-hDdfc] [-p port] [-m port] [-s file]
+    Usage: statsd [-hDdfc] [-p port] [-m port] [-s file] [-G host] [-g port]
         -p port           set statsd udp listener port (default 8125)
         -m port           set statsd management port (default 8126)
         -s file           serialize state to and from file (default disabled)
+        -G host           ganglia host (default disabled)
+        -g port           ganglia port (default 8649)
         -h                this help display
         -d                enable debug
         -D                daemonize
         -f                enable friendly mode (breaks wire compatibility)
+        -c                clear stats on startup
 
