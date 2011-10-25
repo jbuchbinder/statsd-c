@@ -1,0 +1,12 @@
+TODO
+====
+
+* Refactor to use pthreads entirely instead of forking. [DONE]
+* From : https://github.com/etsy/statsd/blob/master/stats.js :
+  * Implement management interface [DONE]
+  * Implement time period handling
+  * Implement graphite export
+  * Implement universal stats counters [DONE]
+* Implement stats serialize/deserialize using JSON for persistence. [DONE]
+* Implement command line option handling. [DONE]
+

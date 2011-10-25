@@ -1,0 +1,801 @@
+/*
+ *          STATSD-C
+ *          C port of Etsy's node.js-based statsd server
+ *
+ *          http://github.com/jbuchbinder/statsd-c
+ *
+ */
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <syslog.h>
+
+#include "serialize.h"
+#include "stats.h"
+#include "timers.h"
+#include "counters.h"
+
+#define BUFLEN 1024
+
+/* Default statsd ports */
+#define PORT 8125
+#define MGMT_PORT 8126
+
+#define STREAM_SEND(x,y) if (send(x, y, strlen(y), 0) == -1) { perror("send error"); }
+#define STREAM_SEND_LONG(x,y) { \
+	char *z = malloc(sizeof(char *)); \
+	sprintf(z, "%ld", y); \
+	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
+	if (z) free(z); \
+	}
+#define STREAM_SEND_INT(x,y) { \
+	char *z = malloc(sizeof(char *)); \
+	sprintf(z, "%d", y); \
+	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
+	if (z) free(z); \
+	}
+#define STREAM_SEND_DOUBLE(x,y) { \
+	char *z = malloc(sizeof(char *)); \
+	sprintf(z, "%f", y); \
+	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
+	if (z) free(z); \
+	}
+#define STREAM_SEND_LONG_DOUBLE(x,y) { \
+	char *z = malloc(sizeof(char *)); \
+	sprintf(z, "%Lf", y); \
+	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
+	if (z) free(z); \
+	}
+#define UPDATE_LAST_MSG_SEEN() { \
+	char *time_sec = malloc(sizeof(char *)); \
+	sprintf(time_sec, "%ld", time(NULL)); \
+	update_stat( "messages", "last_msg_seen", time_sec); \
+	if (time_sec) free(time_sec); \
+	}
+
+#define MGMT_END "END\n\n"
+#define MGMT_BADCOMMAND "ERROR\n"
+#define MGMT_PROMPT "statsd> "
+#define MGMT_HELP "Commands: stats, counters, timers, quit\n\n"
+
+/*
+ * GLOBAL VARIABLES
+ */
+
+statsd_stat_t *stats = NULL;
+sem_t stats_lock;
+statsd_counter_t *counters = NULL;
+sem_t counters_lock;
+statsd_timer_t *timers = NULL;
+sem_t timers_lock;
+
+int stats_udp_socket, stats_mgmt_socket;
+pthread_t thread_stat;
+pthread_t thread_udp;
+pthread_t thread_mgmt;
+int port = PORT, mgmt_port = MGMT_PORT;
+int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0;
+char *serialize_file = NULL;
+
+/*
+ * FUNCTION PROTOTYPES
+ */
+
+void add_timer( char *key, double value );
+void update_stat( char *group, char *key, char *value);
+void update_counter( char *key, double value, double sample_rate );
+void update_timer( char *key, double value );
+void dump_stats();
+void p_thread_udp(void *ptr);
+void p_thread_mgmt(void *ptr);
+void p_thread_stat(void *ptr);
+
+void debug_print(char *s)
+{
+  syslog(LOG_DEBUG, s);
+}
+
+void init_stats() {
+  char *startup_time = malloc(sizeof(char *));
+  sprintf(startup_time, "%ld", time(NULL));
+
+  if (serialize_file && !clear_stats) {
+    debug_print("Deserializing stats from file.\n");
+    statsd_deserialize(serialize_file);
+  }
+
+  remove_stats_lock();
+
+  update_stat( "graphite", "last_flush", startup_time );
+  update_stat( "messages", "last_msg_seen", startup_time );
+  update_stat( "messages", "bad_lines_seen", "0" );
+
+  if (startup_time) free(startup_time);
+}
+
+void cleanup() {
+  pthread_cancel(thread_stat);
+  pthread_cancel(thread_udp);
+  pthread_cancel(thread_mgmt);
+
+  if (stats_udp_socket) {
+    debug_print("Closing socket.\n");
+    close(stats_udp_socket);
+  }
+
+  if (serialize_file) {
+    debug_print("Serializing state to file.\n");
+    if (statsd_serialize(serialize_file)) {
+      debug_print("Serialized state successfully.\n");
+    } else {
+      debug_print("Failed to serialize state.\n");
+    }
+  }
+
+  sem_destroy(&stats_lock);
+  sem_destroy(&timers_lock);
+  sem_destroy(&counters_lock);
+}
+
+void die_with_error(char *s) {
+  perror(s);
+  cleanup();
+  exit(1);
+}
+
+void sigint_handler (int signum) {
+  debug_print("SIGINT caught\n");
+  cleanup();
+  exit(1);
+}
+
+void sigquit_handler (int signum) {
+  debug_print("SIGQUIT caught\n");
+  cleanup();
+  exit(1);
+}
+
+/**
+ * Sanitize statsd keys for storage.
+ */
+void sanitize_key(char *k) {
+  char *dest = malloc(strlen(k) + 1);
+  char *p = k;
+  int c = 0;
+  while (*p != '\0') {
+    if (*p == '.') {
+      *(dest + c) = '_';
+      c++;
+    } else if (*p == '\\' || *p == '/') {
+      *(dest + c) = '-';
+      c++;
+    } else if ( (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-' ) {
+      *(dest + c) = *p;
+      c++;
+    }
+    p++;
+  }
+  *(dest + c) = '\0';
+  memcpy(k, dest, c + 1);
+  if (dest) free(dest);
+}
+
+void sanitize_value(char *k) {
+  char *dest = malloc(strlen(k) + 1);
+  char *p = k;
+  int c = 0;
+  while (*p != '\0') {
+    if ( *p == '.' || *p == '-' || (*p >= '0' && *p <= '9') ) {
+      *(dest + c) = *p;
+      c++;
+    }
+    p++;
+  }
+  *(dest + c) = '\0';
+  memcpy(k, dest, c + 1);
+  if (dest) free(dest);
+}
+
+int main(int argc, char *argv[]) {
+  int pid[3] = { 1, 2, 3 };
+  int opt;
+
+  signal (SIGINT, sigint_handler);
+  signal (SIGQUIT, sigquit_handler);
+
+  sem_init(&stats_lock, 0, 1);
+  sem_init(&timers_lock, 0, 1);
+  sem_init(&counters_lock, 0, 1);
+
+  while ((opt = getopt(argc, argv, "dDfhp:m:s:c")) != -1) {
+    switch (opt) {
+      case 'd':
+        printf("Debug enabled.\n");
+        debug = 1;
+        break;
+      case 'D':
+        printf("Daemonize enabled.\n");
+        daemonize = 1;
+        break;
+      case 'f':
+        printf("Friendly mode enabled (breaks wire compatibility).\n");
+        friendly = 1;
+        break;
+      case 'p':
+        port = atoi(optarg);
+        printf("Statsd port set to %d\n", port);
+        break;
+      case 'm':
+        mgmt_port = atoi(optarg);
+        printf("Management port set to %d\n", mgmt_port);
+        break;
+      case 's':
+        serialize_file = strdup(optarg);
+        printf("Serialize to file %s\n", serialize_file);
+        break;
+      case 'c':
+        clear_stats = 1;
+        printf("Clearing stats on start.\n");
+        break;
+      case 'h':
+        fprintf(stderr, "Usage: %s [-hDdfc] [-p port] [-m port] [-s file]\n", argv[0]);
+        fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
+        fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
+        fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
+        fprintf(stderr, "\t-h                this help display\n");
+        fprintf(stderr, "\t-d                enable debug\n");
+        fprintf(stderr, "\t-D                daemonize\n");
+        fprintf(stderr, "\t-f                enable friendly mode (breaks wire compatibility)\n");
+        fprintf(stderr, "\t-c                clear stats on startup\n");
+        exit(1);
+      default:
+        break;
+    }
+  }
+
+  if (debug) {
+    setlogmask(LOG_UPTO(LOG_DEBUG));
+    openlog("statsd-c", LOG_CONS | LOG_NDELAY | LOG_PERROR | LOG_PID, LOG_USER);
+  } else {
+    setlogmask(LOG_UPTO(LOG_INFO));
+    openlog("statsd-c", LOG_CONS, LOG_USER);
+  }
+
+  /* Initialization of certain stats, here. */
+  init_stats();
+
+  pthread_create (&thread_stat, NULL, (void *) &p_thread_stat, (void *) &pid[0]);
+  pthread_create (&thread_udp,  NULL, (void *) &p_thread_udp,  (void *) &pid[1]);
+  pthread_create (&thread_mgmt, NULL, (void *) &p_thread_mgmt, (void *) &pid[2]);
+
+  pthread_join(thread_stat, NULL);
+  pthread_join(thread_udp, NULL);
+  pthread_join(thread_mgmt, NULL);
+
+  return 0;
+}
+
+void add_timer( char *key, double value ) {
+  statsd_timer_t *t;
+  wait_for_timers_lock();
+  HASH_FIND_STR( timers, key, t );
+  remove_timers_lock();
+  if (t) {
+    /* Add to old entry */
+    int pos = t->count++;
+    t->values[pos - 1] = value;
+  } else {
+    /* Create new entry */
+    t = malloc(sizeof(statsd_timer_t));
+    strcpy(t->key, key);
+    t->count = 1;
+    t->values[t->count - 1] = value;
+
+    wait_for_timers_lock();
+    HASH_ADD_STR( timers, key, t );
+    remove_timers_lock();
+  }
+}
+
+/**
+ * Record or update stat value.
+ */
+void update_stat( char *group, char *key, char *value ) {
+  syslog(LOG_DEBUG, "update_stat ( %s, %s, %s )\n", group, key, value);
+  statsd_stat_t *s;
+  statsd_stat_name_t l;
+
+  wait_for_stats_lock();
+
+  memset(&l, 0, sizeof(statsd_stat_name_t));
+  strcpy(l.group_name, group);
+  strcpy(l.key_name, key);
+  syslog(LOG_DEBUG, "HASH_FIND '%s' '%s'\n", l.group_name, l.key_name);
+  HASH_FIND( hh, stats, &l, sizeof(statsd_stat_name_t), s );
+
+  remove_stats_lock();
+  if (s) {
+    debug_print("Updating old entry\n");
+    while (s->locked) {
+      /* sleep until we're not locked, to avoid locking */
+      usleep(50);
+    }
+    s->locked = 1;
+
+    /* while unlocked, change value ... */
+    s->value = atol( value );
+
+    s->locked = 0;
+  } else {
+    debug_print("Adding new hash\n");
+    s = malloc(sizeof(statsd_stat_t));
+    memset(s, 0, sizeof(statsd_stat_t));
+
+    strcpy(s->name.group_name, group);
+    strcpy(s->name.key_name, key);
+    s->value = atol(value);
+    s->locked = 0;
+
+    wait_for_stats_lock();
+    HASH_ADD( hh, stats, name, sizeof(statsd_stat_name_t), s );
+    remove_stats_lock();
+  }
+}
+
+void update_counter( char *key, double value, double sample_rate ) {
+  syslog(LOG_DEBUG, "update_counter ( %s, %f, %f )\n", key, value, sample_rate);
+  statsd_counter_t *c;
+  wait_for_counters_lock();
+  HASH_FIND_STR( counters, key, c );
+  remove_counters_lock();
+  if (c) {
+    debug_print("Updating old counter entry\n");
+    if (sample_rate == 0) {
+      c->value = c->value + value;
+    } else {
+      c->value = c->value + ( value * ( 1 / sample_rate ) );
+    }
+  } else {
+    debug_print("Adding new counter entry\n");
+    c = malloc(sizeof(statsd_counter_t));
+
+    strcpy(c->key, key);
+    c->value = 0;
+    if (sample_rate == 0) {
+      c->value = value;
+    } else {
+      c->value = value * ( 1 / sample_rate );
+    }
+
+    wait_for_counters_lock();
+    HASH_ADD_STR( counters, key, c );
+    remove_counters_lock();
+  }
+}
+
+void update_timer( char *key, double value ) {
+  syslog(LOG_DEBUG, "update_timer ( %s, %f )\n", key, value);
+  statsd_timer_t *t;
+  wait_for_timers_lock();
+  HASH_FIND_STR( timers, key, t );
+  remove_timers_lock();
+  if (t) {
+    debug_print("Updating old entry\n");
+    wait_for_timers_lock();
+    t->values[t->count] = value;
+    t->count++;
+    remove_timers_lock();
+  } else {
+    debug_print("Adding new hash\n");
+    t = malloc(sizeof(statsd_timer_t));
+
+    strcpy(t->key, key);
+    t->count = 0;
+
+    wait_for_timers_lock();
+    t->values[t->count] = value;
+    t->count++;
+    remove_timers_lock();
+
+    wait_for_timers_lock();
+    HASH_ADD_STR( timers, key, t );
+    remove_timers_lock();
+  }
+}
+
+void dump_stats() {
+  if (debug) {
+    {
+      printf("\n\nStats dump\n==============================\n");
+      statsd_stat_t *s, *tmp;
+      wait_for_stats_lock();
+      HASH_ITER(hh, stats, s, tmp) {
+        printf("\t%s.%s: %ld\n", s->name.group_name, s->name.key_name, s->value);
+      }
+      remove_stats_lock();
+      if (s) free(s);
+      if (tmp) free(tmp);
+      printf("==============================\n\n");
+    }
+
+    {
+      printf("\n\nCounters dump\n==============================\n");
+      statsd_counter_t *c, *tmp;
+      wait_for_counters_lock();
+      HASH_ITER(hh, counters, c, tmp) {
+        printf("\t%s: %Lf\n", c->key, c->value);
+      }
+      remove_counters_lock();
+      if (c) free(c);
+      if (tmp) free(tmp);
+      printf("==============================\n\n");
+    }
+  }
+}
+
+void process_stats_packet(char buf_in[]) {
+  char *key_name = NULL;
+
+  if (strlen(buf_in) < 2) {
+    UPDATE_LAST_MSG_SEEN()
+    return;
+  }
+
+  char *save, *subsave, *token, *subtoken, *bits, *fields;
+  double value = 1.0;
+
+  int i;
+  for (i = 1, bits=&buf_in[0]; ; i++, bits=NULL) {
+    syslog(LOG_DEBUG, "i = %d\n", i);
+    token = strtok_r(bits, ":", &save);
+    if (token == NULL) { break; }
+    if (i == 1) {
+      syslog(LOG_DEBUG, "Found token '%s', key name\n", token);
+      key_name = malloc( strlen(token) + 1);
+      key_name = strdup( token );
+      sanitize_key(key_name);
+      /* break; */
+    } else {
+      syslog(LOG_DEBUG, "\ttoken [#%d] = %s\n", i, token);
+      char *s_sample_rate = NULL, *s_number = NULL;
+      double sample_rate = 1.0;
+      bool is_timer = 0;
+
+      if (strstr(token, "|") == NULL) {
+        debug_print("No pipes found, basic logic\n");
+        sanitize_value(token);
+        syslog(LOG_DEBUG, "\t\tvalue = %s\n", token);
+        value = strtod(token, (char **) NULL);
+        syslog(LOG_DEBUG, "\t\tvalue = %s => %f\n", token, value);
+      } else {
+        int j;
+        for (j = 1, fields = token; ; j++, fields = NULL) {
+          subtoken = strtok_r(fields, "|", &subsave);
+          if (subtoken == NULL) { break; }
+          syslog(LOG_DEBUG, "\t\tsubtoken = %s\n", subtoken);
+  
+          switch (j) {
+            case 1:
+              debug_print("case 1");
+              sanitize_value(subtoken);
+              value = strtod(subtoken, (char **) NULL);
+              break;
+            case 2:
+              debug_print("case 2");
+              if (subtoken == NULL) { break ; }
+              if (strlen(subtoken) < 2) {
+                debug_print("subtoken length < 2");
+                is_timer = 0;
+              } else {
+                debug_print("subtoken length >= 2");
+                if (*subtoken == 'm' && *(subtoken + 1) == 's') {
+                  is_timer = 1;
+                }
+              }
+              break;
+            case 3:
+              debug_print("case 3");
+              if (subtoken == NULL) { break ; }
+              s_sample_rate = malloc(strlen(subtoken) + 1);
+              s_sample_rate = strdup(subtoken);
+              break;
+          }
+        }
+      }
+
+      debug_print("Post token processing\n");
+
+      if (is_timer == 1) {
+        /* ms passed, handle timer */
+        update_timer( key_name, value );
+      } else {
+        /* Handle non-timer, as counter */
+        if (s_sample_rate && *s_sample_rate == '@') {
+          sample_rate = strtod( (char *) *(s_sample_rate + 1), (char **) NULL );
+        }
+        update_counter(key_name, value, sample_rate);
+        syslog(LOG_DEBUG, "UDP: Found key name '%s'\n", key_name);
+        syslog(LOG_DEBUG, "UDP: Found value '%f'\n", value);
+      }
+      if (s_sample_rate) free(s_sample_rate);
+      if (s_number) free(s_number);
+    }
+  }
+  i--; /* For ease */
+
+  printf("After loop, i = %d, value = %f\n", i, value);
+
+  if (i <= 1) {
+    /* No value, assign "1" and process */
+    update_counter(key_name, value, 1);
+  }
+
+  debug_print("freeing key and value\n");
+  if (key_name) free(key_name);
+      
+  UPDATE_LAST_MSG_SEEN()
+}
+
+/*
+ *  THREADS
+ */
+
+void p_thread_udp(void *ptr) {
+  printf("Thread[Udp]: Starting thread %d\n", (int) *((int *) ptr));
+    struct sockaddr_in si_me, si_other;
+    fd_set read_flags,write_flags;
+    struct timeval waitd;
+    int stat;
+
+    /* begin udp listener */
+
+    if ((stats_udp_socket=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP))==-1)
+      die_with_error("UDP: Could not grab socket.");
+
+    /* Reuse socket, please */
+    int on = 1;
+    setsockopt(stats_udp_socket, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+
+    /* Use non-blocking sockets */
+    int flags = fcntl(stats_udp_socket, F_GETFL, 0);
+    fcntl(stats_udp_socket, F_SETFL, flags | O_NONBLOCK);
+
+    memset((char *) &si_me, 0, sizeof(si_me));
+    si_me.sin_family = AF_INET;
+    si_me.sin_port = htons(port);
+    si_me.sin_addr.s_addr = htonl(INADDR_ANY);
+    debug_print("UDP: Binding to socket.\n");
+    if (bind(stats_udp_socket, (struct sockaddr *)&si_me, sizeof(si_me))==-1)
+        die_with_error("UDP: Could not bind");
+    debug_print("UDP: Bound to socket.\n");
+
+    while (1) {
+      waitd.tv_sec = 1;
+      waitd.tv_usec = 0;
+      FD_ZERO(&read_flags);
+      FD_ZERO(&write_flags);
+      FD_SET(stats_udp_socket, &read_flags);
+
+      stat = select(stats_udp_socket+1, &read_flags, &write_flags, (fd_set*)0, &waitd);
+      /* If we can't do anything for some reason, wait a bit */
+      if (stat < 0) {
+        sleep(1);
+        continue;
+      }
+
+      char buf_in[BUFLEN];
+      if (FD_ISSET(stats_udp_socket, &read_flags)) {
+        FD_CLR(stats_udp_socket, &read_flags);
+        memset(&buf_in, 0, sizeof(buf_in));
+        if (read(stats_udp_socket, buf_in, sizeof(buf_in)-1) <= 0) {
+          close(stats_udp_socket);
+          break;
+        }
+
+        syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n", 
+            inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf_in);
+
+        process_stats_packet(buf_in);
+      }
+    }
+
+    if (stats_udp_socket) close(stats_udp_socket);
+
+    /* end udp listener */
+  printf("Thread[Udp]: Ending thread %d\n", (int) *((int *) ptr));
+  pthread_exit(0);
+}
+
+void p_thread_mgmt(void *ptr) {
+  printf("Thread[Mgmt]: Starting thread %d\n", (int) *((int *) ptr));
+    /* begin mgmt listener */
+
+  fd_set master;
+  fd_set read_fds;
+  struct sockaddr_in serveraddr;
+  struct sockaddr_in clientaddr;
+  int fdmax;
+  int newfd;
+  char buf[1024];
+  int nbytes;
+  int yes = 1;
+  int addrlen;
+  int i;
+
+  FD_ZERO(&master);
+  FD_ZERO(&read_fds);
+ 
+  if((stats_mgmt_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+  {
+    perror("socke) error");
+    exit(1);
+  }
+  if(setsockopt(stats_mgmt_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
+  {
+    perror("setsockopt error");
+    exit(1);
+  }
+ 
+  /* bind */
+  serveraddr.sin_family = AF_INET;
+  serveraddr.sin_addr.s_addr = INADDR_ANY;
+  serveraddr.sin_port = htons(mgmt_port);
+  memset(&(serveraddr.sin_zero), '\0', 8);
+ 
+  if(bind(stats_mgmt_socket, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) == -1) {
+    exit(1);
+  }
+ 
+  if(listen(stats_mgmt_socket, 10) == -1) {
+    exit(1);
+  }
+ 
+  FD_SET(stats_mgmt_socket, &master);
+  fdmax = stats_mgmt_socket;
+ 
+  for(;;) {
+    read_fds = master;
+ 
+    if(select(fdmax+1, &read_fds, NULL, NULL, NULL) == -1) {
+      perror("select error");
+      exit(1);
+    }
+
+    for(i = 0; i <= fdmax; i++) {
+      if(FD_ISSET(i, &read_fds)) {
+        if(i == stats_mgmt_socket) {
+          addrlen = sizeof(clientaddr);
+          if((newfd = accept(stats_mgmt_socket, (struct sockaddr *)&clientaddr, (socklen_t *) &addrlen)) == -1) {
+            perror("accept error");
+          } else {
+            FD_SET(newfd, &master);
+            if(newfd > fdmax) {
+              fdmax = newfd;
+            }
+            printf("New connection from %s on socket %d\n", inet_ntoa(clientaddr.sin_addr), newfd);
+
+            /* Send prompt on connection */
+            if (friendly) { STREAM_SEND(newfd, MGMT_PROMPT) }
+          }
+        } else {
+          /* handle data from a client */
+          if((nbytes = recv(i, buf, sizeof(buf), 0)) <= 0) {
+            if(nbytes == 0) {
+              printf("socket %d hung up\n", i);
+            } else {
+              perror("recv() error");
+            }
+ 
+            close(i);
+            FD_CLR(i, &master);
+          } else {
+            printf("Found data: '%s'\n", buf);
+            char *bufptr = &buf[0];
+            if (strncasecmp(bufptr, (char *)"help", 4) == 0) {
+              STREAM_SEND(i, MGMT_HELP)
+              if (friendly) { STREAM_SEND(i, MGMT_PROMPT) }
+            } else if (strncasecmp(bufptr, (char *)"counters", 8) == 0) {
+              /* send counters */
+
+              statsd_counter_t *s_counter, *tmp;
+              wait_for_counters_lock();
+              HASH_ITER(hh, counters, s_counter, tmp) {
+                STREAM_SEND(i, s_counter->key)
+                STREAM_SEND(i, ": ")
+                STREAM_SEND_LONG_DOUBLE(i, s_counter->value)
+                STREAM_SEND(i, "\n")
+              }
+              remove_counters_lock();
+              if (s_counter) free(s_counter);
+              if (tmp) free(tmp);
+
+              STREAM_SEND(i, MGMT_END)
+              if (friendly) { STREAM_SEND(i, MGMT_PROMPT) }
+            } else if (strncasecmp(bufptr, (char *)"timers", 6) == 0) {
+              /* send timers */
+
+              statsd_timer_t *s_timer, *tmp;
+              wait_for_timers_lock();
+              HASH_ITER(hh, timers, s_timer, tmp) {
+                STREAM_SEND(i, s_timer->key)
+                STREAM_SEND(i, ": ")
+                STREAM_SEND_INT(i, s_timer->count)
+                if (s_timer->count > 0) {
+                  int j;
+		  STREAM_SEND(i, " [")
+                  for (j=0; j<s_timer->count; j++) {
+                    if (j != 0) { STREAM_SEND(i, ",") }
+                    STREAM_SEND_DOUBLE(i, s_timer->values[j])
+                  }
+		  STREAM_SEND(i, "]")
+                }
+                STREAM_SEND(i, "\n")
+              }
+              remove_timers_lock();
+              if (s_timer) free(s_timer);
+              if (tmp) free(tmp);
+
+              STREAM_SEND(i, MGMT_END)
+              if (friendly) { STREAM_SEND(i, MGMT_PROMPT) }
+            } else if (strncasecmp(bufptr, (char *)"stats", 5) == 0) {
+              /* send stats */
+
+              statsd_stat_t *s_stat, *tmp;
+              wait_for_stats_lock();
+              HASH_ITER(hh, stats, s_stat, tmp) {
+                if (strlen(s_stat->name.group_name) > 1) {
+                  STREAM_SEND(i, s_stat->name.group_name)
+                  STREAM_SEND(i, ".")
+                }
+                STREAM_SEND(i, s_stat->name.key_name)
+                STREAM_SEND(i, ": ")
+                STREAM_SEND_LONG(i, s_stat->value)
+                STREAM_SEND(i, "\n")
+              }
+              remove_stats_lock();
+              if (s_stat) free(s_stat);
+              if (tmp) free(tmp);
+
+              STREAM_SEND(i, MGMT_END)
+              if (friendly) { STREAM_SEND(i, MGMT_PROMPT) }
+            } else if (strncasecmp(bufptr, (char *)"quit", 4) == 0) {
+              /* disconnect */
+              close(i);
+              FD_CLR(i, &master);
+            } else {
+              STREAM_SEND(i, MGMT_BADCOMMAND)
+              if (friendly) { STREAM_SEND(i, MGMT_PROMPT) }
+            }
+          }
+        }
+      }
+    }
+  }
+
+    /* end mgmt listener */
+
+  printf("Thread[Mgmt]: Ending thread %d\n", (int) *((int *) ptr));
+  pthread_exit(0);
+}
+
+void p_thread_stat(void *ptr) {
+  printf("Thread[Stat]: Starting thread %d\n", (int) *((int *) ptr));
+  while (1) {
+    dump_stats();
+    sleep(10);
+  }
+  printf("Thread[Stat]: Ending thread %d\n", (int) *((int *) ptr));
+  pthread_exit(0);
+}
+
