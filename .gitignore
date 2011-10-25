@@ -1,3 +1,4 @@
 statsd
 src/*.o
 src/json-c/*.o
+src/embeddedgmetric/*.o

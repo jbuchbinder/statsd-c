@@ -9,6 +9,9 @@ BINARY= statsd
 OBJECTS= \
 	src/statsd.o \
 	src/serialize.o \
+	src/strings.o \
+	src/embeddedgmetric/embeddedgmetric.o \
+	src/embeddedgmetric/modp_numtoa.o \
 	src/json-c/arraylist.o \
 	src/json-c/debug.o \
 	src/json-c/json_object.o \
@@ -19,7 +22,9 @@ OBJECTS= \
 
 # Compilation settings
 CC= gcc
-CFLAGS= -fPIC -Wall -pthread -lpthread -Isrc/json-c -Wno-format-security -Wno-int-to-pointer-cast
+CFLAGS= -fPIC -Wall -pthread -lpthread \
+	-Isrc/json-c -Isrc/embeddedgmetric \
+	-Wno-format-security -Wno-int-to-pointer-cast
 
 # ANSI formatting
 BOLD=\033[1m

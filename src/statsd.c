@@ -8,30 +8,38 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/types.h>
 #include <sys/socket.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
-#include <unistd.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <syslog.h>
+#include <unistd.h>
 
 #include "serialize.h"
 #include "stats.h"
 #include "timers.h"
 #include "counters.h"
+#include "strings.h"
+#include "embeddedgmetric.h"
 
 #define BUFLEN 1024
 
 /* Default statsd ports */
 #define PORT 8125
 #define MGMT_PORT 8126
+#define GANGLIA_PORT 8649
 
+/* Define stat flush interval in ms */
+#define FLUSH_INTERVAL 10000
+
+#define THREAD_USLEEP(x) { pthread_mutex_t fakeMutex = PTHREAD_MUTEX_INITIALIZER; pthread_cond_t fakeCond = PTHREAD_COND_INITIALIZER; struct timespec timeToWait; struct timeval now; int rt; gettimeofday(&now,NULL); timeToWait.tv_sec = now.tv_sec + (x / 1000); timeToWait.tv_nsec = now.tv_usec * 1000; pthread_mutex_lock(&fakeMutex); rt = pthread_cond_timedwait(&fakeCond, &fakeMutex, &timeToWait); if (rt != 0) { syslog(LOG_ERR, "Failed to wait"); } pthread_mutex_unlock(&fakeMutex); }
 #define STREAM_SEND(x,y) if (send(x, y, strlen(y), 0) == -1) { perror("send error"); }
 #define STREAM_SEND_LONG(x,y) { \
 	char *z = malloc(sizeof(char *)); \
@@ -70,6 +78,53 @@
 #define MGMT_HELP "Commands: stats, counters, timers, quit\n\n"
 
 /*
+ * GMETRIC SENDING
+ */
+
+#define SEND_GMETRIC_DOUBLE(myname, myvalue, myunit) { \
+	gmetric_message_t msg; \
+	msg.type = GMETRIC_VALUE_DOUBLE; \
+	msg.name = myname; \
+	msg.value.v_double = myvalue; \
+	msg.units = myunit; \
+	msg.slope = GMETRIC_SLOPE_BOTH; \
+	msg.tmax = FLUSH_INTERVAL / 1000; \
+	msg.dmax = 0; \
+	int len = gmetric_message_create_xdr(buf, sizeof(buf), &msg); \
+	if (len != -1) { \
+		gmetric_send_xdr(&gm, buf, len); \
+	} \
+	}
+#define SEND_GMETRIC_INT(myname, myvalue, myunit) { \
+	gmetric_message_t msg; \
+	msg.type = GMETRIC_VALUE_INT; \
+	msg.name = myname; \
+	msg.value.v_double = myvalue; \
+	msg.units = myunit; \
+	msg.slope = GMETRIC_SLOPE_BOTH; \
+	msg.tmax = FLUSH_INTERVAL / 1000; \
+	msg.dmax = 0; \
+	int len = gmetric_message_create_xdr(buf, sizeof(buf), &msg); \
+	if (len != -1) { \
+		gmetric_send_xdr(&gm, buf, len); \
+	} \
+	}
+#define SEND_GMETRIC_STRING(myname, myvalue, myunit) { \
+	gmetric_message_t msg; \
+	msg.type = GMETRIC_VALUE_STRING; \
+	msg.name = myname; \
+	msg.value.v_double = myvalue; \
+	msg.units = myunit; \
+	msg.slope = GMETRIC_SLOPE_BOTH; \
+	msg.tmax = FLUSH_INTERVAL / 1000; \
+	msg.dmax = 0; \
+	int len = gmetric_message_create_xdr(buf, sizeof(buf), &msg); \
+	if (len != -1) { \
+		gmetric_send_xdr(gm, buf, len); \
+	} \
+	}
+
+/*
  * GLOBAL VARIABLES
  */
 
@@ -84,9 +139,10 @@ int stats_udp_socket, stats_mgmt_socket;
 pthread_t thread_stat;
 pthread_t thread_udp;
 pthread_t thread_mgmt;
-int port = PORT, mgmt_port = MGMT_PORT;
+pthread_t thread_flush;
+int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT;
 int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0;
-char *serialize_file = NULL;
+char *serialize_file = NULL, *ganglia_host = NULL;
 
 /*
  * FUNCTION PROTOTYPES
@@ -100,6 +156,7 @@ void dump_stats();
 void p_thread_udp(void *ptr);
 void p_thread_mgmt(void *ptr);
 void p_thread_stat(void *ptr);
+void p_thread_flush(void *ptr);
 
 void init_stats() {
   char *startup_time = malloc(sizeof(char *));
@@ -120,6 +177,7 @@ void init_stats() {
 }
 
 void cleanup() {
+  pthread_cancel(thread_flush);
   pthread_cancel(thread_stat);
   pthread_cancel(thread_udp);
   pthread_cancel(thread_mgmt);
@@ -161,49 +219,8 @@ void sigquit_handler (int signum) {
   exit(1);
 }
 
-/**
- * Sanitize statsd keys for storage.
- */
-void sanitize_key(char *k) {
-  char *dest = malloc(strlen(k) + 1);
-  char *p = k;
-  int c = 0;
-  while (*p != '\0') {
-    if (*p == '.') {
-      *(dest + c) = '_';
-      c++;
-    } else if (*p == '\\' || *p == '/') {
-      *(dest + c) = '-';
-      c++;
-    } else if ( (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-' ) {
-      *(dest + c) = *p;
-      c++;
-    }
-    p++;
-  }
-  *(dest + c) = '\0';
-  memcpy(k, dest, c + 1);
-  if (dest) free(dest);
-}
-
-void sanitize_value(char *k) {
-  char *dest = malloc(strlen(k) + 1);
-  char *p = k;
-  int c = 0;
-  while (*p != '\0') {
-    if ( *p == '.' || *p == '-' || (*p >= '0' && *p <= '9') ) {
-      *(dest + c) = *p;
-      c++;
-    }
-    p++;
-  }
-  *(dest + c) = '\0';
-  memcpy(k, dest, c + 1);
-  if (dest) free(dest);
-}
-
 int main(int argc, char *argv[]) {
-  int pid[3] = { 1, 2, 3 };
+  int pids[4] = { 1, 2, 3, 4 };
   int opt;
 
   signal (SIGINT, sigint_handler);
@@ -213,7 +230,7 @@ int main(int argc, char *argv[]) {
   sem_init(&timers_lock, 0, 1);
   sem_init(&counters_lock, 0, 1);
 
-  while ((opt = getopt(argc, argv, "dDfhp:m:s:c")) != -1) {
+  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:")) != -1) {
     switch (opt) {
       case 'd':
         printf("Debug enabled.\n");
@@ -243,11 +260,21 @@ int main(int argc, char *argv[]) {
         clear_stats = 1;
         printf("Clearing stats on start.\n");
         break;
+      case 'G':
+        ganglia_host = strdup(optarg);
+        printf("Ganglia host %s\n", ganglia_host);
+        break;
+      case 'g':
+        ganglia_port = atoi(optarg);
+        printf("Ganglia port %d\n", ganglia_port);
+        break;
       case 'h':
-        fprintf(stderr, "Usage: %s [-hDdfc] [-p port] [-m port] [-s file]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-hDdfc] [-p port] [-m port] [-s file] [-G host] [-g port]\n", argv[0]);
         fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
         fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
         fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
+        fprintf(stderr, "\t-G host           ganglia host (default disabled)\n");
+        fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
         fprintf(stderr, "\t-h                this help display\n");
         fprintf(stderr, "\t-d                enable debug\n");
         fprintf(stderr, "\t-D                daemonize\n");
@@ -270,13 +297,15 @@ int main(int argc, char *argv[]) {
   /* Initialization of certain stats, here. */
   init_stats();
 
-  pthread_create (&thread_stat, NULL, (void *) &p_thread_stat, (void *) &pid[0]);
-  pthread_create (&thread_udp,  NULL, (void *) &p_thread_udp,  (void *) &pid[1]);
-  pthread_create (&thread_mgmt, NULL, (void *) &p_thread_mgmt, (void *) &pid[2]);
+  pthread_create (&thread_stat,  NULL, (void *) &p_thread_stat,  (void *) &pids[0]);
+  pthread_create (&thread_udp,   NULL, (void *) &p_thread_udp,   (void *) &pids[1]);
+  pthread_create (&thread_mgmt,  NULL, (void *) &p_thread_mgmt,  (void *) &pids[2]);
+  pthread_create (&thread_flush, NULL, (void *) &p_thread_flush, (void *) &pids[3]);
 
-  pthread_join(thread_stat, NULL);
-  pthread_join(thread_udp, NULL);
-  pthread_join(thread_mgmt, NULL);
+  pthread_join(thread_stat,  NULL);
+  pthread_join(thread_udp,   NULL);
+  pthread_join(thread_mgmt,  NULL);
+  pthread_join(thread_flush, NULL);
 
   return 0;
 }
@@ -778,6 +807,138 @@ void p_thread_stat(void *ptr) {
     sleep(10);
   }
   syslog(LOG_INFO, "Thread[Stat]: Ending thread %d\n", (int) *((int *) ptr));
+  pthread_exit(0);
+}
+
+void p_thread_flush(void *ptr) {
+  syslog(LOG_INFO, "Thread[Flush]: Starting thread %d\n", (int) *((int *) ptr));
+  while (1) {
+    THREAD_USLEEP(FLUSH_INTERVAL);
+
+    gmetric_t gm;
+    bool enable_gmetric = (ganglia_host != NULL);
+    char buf[GMETRIC_MAX_MESSAGE_LEN];
+
+    if (enable_gmetric) {
+      gmetric_create(&gm);
+      if (!gmetric_open(&gm, ganglia_host, ganglia_port)) {
+        syslog(LOG_ERR, "Unable to connect to ganglia host %s:%d", ganglia_host, ganglia_port);
+        enable_gmetric = false;
+      }
+    }
+
+    long ts = time(NULL);
+    char *ts_string = ltoa(ts);
+    int numStats = 0;
+    char *statString = NULL;
+
+    {
+      statsd_counter_t *s_counter, *tmp;
+      wait_for_counters_lock();
+      HASH_ITER(hh, counters, s_counter, tmp) {
+        long double value = s_counter->value / (FLUSH_INTERVAL / 1000);
+        char *message = malloc(sizeof(char) * BUFLEN);
+        sprintf(message, "stats.%s %Lf %ld\nstats_counts.%s %Lf %ld\n", s_counter->key, value, ts, s_counter->key, s_counter->value, ts);
+        if (enable_gmetric) {
+          {
+            char *k = malloc(strlen(s_counter->key) + 6);
+            sprintf(k, "stats_%s", s_counter->key);
+            SEND_GMETRIC_DOUBLE(k, value, "no units");
+            if (k) free(k);
+          }
+          {
+            char *k = malloc(strlen(s_counter->key) + 13);
+            sprintf(k, "stats_counts_%s", s_counter->key);
+            SEND_GMETRIC_DOUBLE(k, s_counter->value, "no units");
+            if (k) free(k);
+          }
+        }
+        if (statString) {
+          statString = realloc(statString, strlen(statString) + strlen(message));
+          strcat(statString, message);
+        } else {
+          statString = strdup(message);
+        }
+        numStats++;
+      }
+      remove_counters_lock();
+      if (s_counter) free(s_counter);
+      if (tmp) free(tmp);
+    }
+
+    {
+      statsd_timer_t *s_timer, *tmp;
+      wait_for_timers_lock();
+      HASH_ITER(hh, timers, s_timer, tmp) {
+        if (s_timer->count > 0) {
+          int pctThreshold = 90; /* TODO FIXME */
+          double min = 0; /* TODO FIXME */
+          double max = 1; /* TODO FIXME */
+
+          double mean = min;
+          double maxAtThreshold = max;
+
+          if (s_timer->count > 1) {
+            double thresholdIndex = ((100 - pctThreshold) / 100) * s_timer->count;
+            int numInThreshold = s_timer->count - thresholdIndex;
+            maxAtThreshold = s_timer->values[numInThreshold - 1];
+
+            double sum = 0;
+            int i;
+            for (i = 0; i < numInThreshold; i++) {
+              sum += s_timer->values[i];
+            }
+            mean = sum / numInThreshold;
+          }
+
+          char *message = malloc(sizeof(char) * BUFLEN);
+          sprintf(message, "stats.timers.%s.mean %f %ld\n"
+            "stats.timers.%s.upper %f %ld\n"
+            "stats.timers.%s.upper_%d %f %ld\n"
+            "stats.timers.%s.lower %f %ld\n"
+            "stats.timers.%s.count %d %ld\n",
+            s_timer->key, mean, ts,
+            s_timer->key, max, ts,
+            s_timer->key, pctThreshold, maxAtThreshold, ts,
+            s_timer->key, min, ts,
+            s_timer->key, s_timer->count, ts
+          );
+          if (statString) {
+            statString = realloc(statString, strlen(statString) + strlen(message));
+            strcat(statString, message);
+          } else {
+            statString = strdup(message);
+          }
+        }
+        numStats++;
+      }
+      remove_timers_lock();
+      if (s_timer) free(s_timer);
+      if (tmp) free(tmp);
+    }
+
+    {
+      char *message = malloc(sizeof(char) * BUFLEN);
+      sprintf(message, "statsd.numStats %d %ld\n", numStats, ts);
+      if (statString) {
+        statString = realloc(statString, strlen(statString) + strlen(message));
+        strcat(statString, message);
+      } else {
+        statString = strdup(message);
+      }
+    }
+
+    /* TODO: Flush to stats collector(s) */
+    printf("Messages:\n%s", statString);
+
+    if (enable_gmetric) {
+      gmetric_close(&gm);
+    }
+
+    if (ts_string) free(ts_string);
+    if (statString) free(statString);
+  }
+  syslog(LOG_INFO, "Thread[Flush]: Ending thread %d\n", (int) *((int *) ptr));
   pthread_exit(0);
 }
 

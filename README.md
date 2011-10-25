@@ -10,6 +10,7 @@ Your mileage may vary. It works for me, and it *should* be wire compatible with 
 
 There are some libraries used/included:
 
+* [embeddedmgetric](http://code.google.com/p/embeddedgmetric/) : Ganglia gmetric support (BSD)
 * [json-c](http://oss.metaparadigm.com/json-c/) : JSON (de)serialization (BSD)
 * [uthash](http://uthash.sourceforge.net/ ): Hash management "library" (BSD)
 
