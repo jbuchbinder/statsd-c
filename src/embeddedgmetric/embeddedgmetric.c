@@ -173,7 +173,7 @@ int gmetric_open_raw(gmetric_t* g, uint32_t ip, int port)
 int gmetric_open(gmetric_t* g, const char* addr, int port)
 {
     struct hostent* result = NULL;
-#if 0
+#ifdef __linux__
     /* super annoying thread safe version */
     /* linux 6-arg version                */
     struct hostent he;
