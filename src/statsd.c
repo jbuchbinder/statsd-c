@@ -101,17 +101,12 @@ void p_thread_udp(void *ptr);
 void p_thread_mgmt(void *ptr);
 void p_thread_stat(void *ptr);
 
-void debug_print(char *s)
-{
-  syslog(LOG_DEBUG, s);
-}
-
 void init_stats() {
   char *startup_time = malloc(sizeof(char *));
   sprintf(startup_time, "%ld", time(NULL));
 
   if (serialize_file && !clear_stats) {
-    debug_print("Deserializing stats from file.\n");
+    syslog(LOG_DEBUG, "Deserializing stats from file.");
     statsd_deserialize(serialize_file);
   }
 
@@ -130,16 +125,16 @@ void cleanup() {
   pthread_cancel(thread_mgmt);
 
   if (stats_udp_socket) {
-    debug_print("Closing socket.\n");
+    syslog(LOG_INFO, "Closing UDP stats socket.");
     close(stats_udp_socket);
   }
 
   if (serialize_file) {
-    debug_print("Serializing state to file.\n");
+    syslog(LOG_INFO, "Serializing state to file.");
     if (statsd_serialize(serialize_file)) {
-      debug_print("Serialized state successfully.\n");
+      syslog(LOG_INFO, "Serialized state successfully.");
     } else {
-      debug_print("Failed to serialize state.\n");
+      syslog(LOG_ERR, "Failed to serialize state.");
     }
   }
 
@@ -155,13 +150,13 @@ void die_with_error(char *s) {
 }
 
 void sigint_handler (int signum) {
-  debug_print("SIGINT caught\n");
+  syslog(LOG_ERR, "SIGINT caught");
   cleanup();
   exit(1);
 }
 
 void sigquit_handler (int signum) {
-  debug_print("SIGQUIT caught\n");
+  syslog(LOG_ERR, "SIGQUIT caught");
   cleanup();
   exit(1);
 }
@@ -290,7 +285,6 @@ void add_timer( char *key, double value ) {
   statsd_timer_t *t;
   wait_for_timers_lock();
   HASH_FIND_STR( timers, key, t );
-  remove_timers_lock();
   if (t) {
     /* Add to old entry */
     int pos = t->count++;
@@ -298,14 +292,14 @@ void add_timer( char *key, double value ) {
   } else {
     /* Create new entry */
     t = malloc(sizeof(statsd_timer_t));
+
     strcpy(t->key, key);
     t->count = 1;
     t->values[t->count - 1] = value;
 
-    wait_for_timers_lock();
     HASH_ADD_STR( timers, key, t );
-    remove_timers_lock();
   }
+  remove_timers_lock();
 }
 
 /**
@@ -324,21 +318,12 @@ void update_stat( char *group, char *key, char *value ) {
   syslog(LOG_DEBUG, "HASH_FIND '%s' '%s'\n", l.group_name, l.key_name);
   HASH_FIND( hh, stats, &l, sizeof(statsd_stat_name_t), s );
 
-  remove_stats_lock();
   if (s) {
-    debug_print("Updating old entry\n");
-    while (s->locked) {
-      /* sleep until we're not locked, to avoid locking */
-      usleep(50);
-    }
-    s->locked = 1;
+    syslog(LOG_DEBUG, "Updating old stat entry");
 
-    /* while unlocked, change value ... */
     s->value = atol( value );
-
-    s->locked = 0;
   } else {
-    debug_print("Adding new hash\n");
+    syslog(LOG_DEBUG, "Adding new stat entry");
     s = malloc(sizeof(statsd_stat_t));
     memset(s, 0, sizeof(statsd_stat_t));
 
@@ -347,10 +332,9 @@ void update_stat( char *group, char *key, char *value ) {
     s->value = atol(value);
     s->locked = 0;
 
-    wait_for_stats_lock();
     HASH_ADD( hh, stats, name, sizeof(statsd_stat_name_t), s );
-    remove_stats_lock();
   }
+  remove_stats_lock();
 }
 
 void update_counter( char *key, double value, double sample_rate ) {
@@ -358,16 +342,15 @@ void update_counter( char *key, double value, double sample_rate ) {
   statsd_counter_t *c;
   wait_for_counters_lock();
   HASH_FIND_STR( counters, key, c );
-  remove_counters_lock();
   if (c) {
-    debug_print("Updating old counter entry\n");
+    syslog(LOG_DEBUG, "Updating old counter entry");
     if (sample_rate == 0) {
       c->value = c->value + value;
     } else {
       c->value = c->value + ( value * ( 1 / sample_rate ) );
     }
   } else {
-    debug_print("Adding new counter entry\n");
+    syslog(LOG_DEBUG, "Adding new counter entry");
     c = malloc(sizeof(statsd_counter_t));
 
     strcpy(c->key, key);
@@ -378,10 +361,9 @@ void update_counter( char *key, double value, double sample_rate ) {
       c->value = value * ( 1 / sample_rate );
     }
 
-    wait_for_counters_lock();
     HASH_ADD_STR( counters, key, c );
-    remove_counters_lock();
   }
+  remove_counters_lock();
 }
 
 void update_timer( char *key, double value ) {
@@ -391,13 +373,13 @@ void update_timer( char *key, double value ) {
   HASH_FIND_STR( timers, key, t );
   remove_timers_lock();
   if (t) {
-    debug_print("Updating old entry\n");
+    syslog(LOG_DEBUG, "Updating old timer entry");
     wait_for_timers_lock();
     t->values[t->count] = value;
     t->count++;
     remove_timers_lock();
   } else {
-    debug_print("Adding new hash\n");
+    syslog(LOG_DEBUG, "Adding new timer entry");
     t = malloc(sizeof(statsd_timer_t));
 
     strcpy(t->key, key);
@@ -473,7 +455,7 @@ void process_stats_packet(char buf_in[]) {
       bool is_timer = 0;
 
       if (strstr(token, "|") == NULL) {
-        debug_print("No pipes found, basic logic\n");
+        syslog(LOG_DEBUG, "No pipes found, basic logic");
         sanitize_value(token);
         syslog(LOG_DEBUG, "\t\tvalue = %s\n", token);
         value = strtod(token, (char **) NULL);
@@ -487,25 +469,25 @@ void process_stats_packet(char buf_in[]) {
   
           switch (j) {
             case 1:
-              debug_print("case 1");
+              syslog(LOG_DEBUG, "case 1");
               sanitize_value(subtoken);
               value = strtod(subtoken, (char **) NULL);
               break;
             case 2:
-              debug_print("case 2");
+              syslog(LOG_DEBUG, "case 2");
               if (subtoken == NULL) { break ; }
               if (strlen(subtoken) < 2) {
-                debug_print("subtoken length < 2");
+                syslog(LOG_DEBUG, "subtoken length < 2");
                 is_timer = 0;
               } else {
-                debug_print("subtoken length >= 2");
+                syslog(LOG_DEBUG, "subtoken length >= 2");
                 if (*subtoken == 'm' && *(subtoken + 1) == 's') {
                   is_timer = 1;
                 }
               }
               break;
             case 3:
-              debug_print("case 3");
+              syslog(LOG_DEBUG, "case 3");
               if (subtoken == NULL) { break ; }
               s_sample_rate = malloc(strlen(subtoken) + 1);
               s_sample_rate = strdup(subtoken);
@@ -514,7 +496,7 @@ void process_stats_packet(char buf_in[]) {
         }
       }
 
-      debug_print("Post token processing\n");
+      syslog(LOG_DEBUG, "Post token processing");
 
       if (is_timer == 1) {
         /* ms passed, handle timer */
@@ -534,14 +516,14 @@ void process_stats_packet(char buf_in[]) {
   }
   i--; /* For ease */
 
-  printf("After loop, i = %d, value = %f\n", i, value);
+  syslog(LOG_DEBUG, "After loop, i = %d, value = %f", i, value);
 
   if (i <= 1) {
     /* No value, assign "1" and process */
     update_counter(key_name, value, 1);
   }
 
-  debug_print("freeing key and value\n");
+  syslog(LOG_DEBUG, "freeing key and value");
   if (key_name) free(key_name);
       
   UPDATE_LAST_MSG_SEEN()
@@ -552,7 +534,7 @@ void process_stats_packet(char buf_in[]) {
  */
 
 void p_thread_udp(void *ptr) {
-  printf("Thread[Udp]: Starting thread %d\n", (int) *((int *) ptr));
+  syslog(LOG_INFO, "Thread[Udp]: Starting thread %d\n", (int) *((int *) ptr));
     struct sockaddr_in si_me, si_other;
     fd_set read_flags,write_flags;
     struct timeval waitd;
@@ -575,10 +557,10 @@ void p_thread_udp(void *ptr) {
     si_me.sin_family = AF_INET;
     si_me.sin_port = htons(port);
     si_me.sin_addr.s_addr = htonl(INADDR_ANY);
-    debug_print("UDP: Binding to socket.\n");
+    syslog(LOG_DEBUG, "UDP: Binding to socket.");
     if (bind(stats_udp_socket, (struct sockaddr *)&si_me, sizeof(si_me))==-1)
         die_with_error("UDP: Could not bind");
-    debug_print("UDP: Bound to socket.\n");
+    syslog(LOG_DEBUG, "UDP: Bound to socket.");
 
     while (1) {
       waitd.tv_sec = 1;
@@ -613,12 +595,12 @@ void p_thread_udp(void *ptr) {
     if (stats_udp_socket) close(stats_udp_socket);
 
     /* end udp listener */
-  printf("Thread[Udp]: Ending thread %d\n", (int) *((int *) ptr));
+  syslog(LOG_INFO, "Thread[Udp]: Ending thread %d\n", (int) *((int *) ptr));
   pthread_exit(0);
 }
 
 void p_thread_mgmt(void *ptr) {
-  printf("Thread[Mgmt]: Starting thread %d\n", (int) *((int *) ptr));
+  syslog(LOG_INFO, "Thread[Mgmt]: Starting thread %d\n", (int) *((int *) ptr));
     /* begin mgmt listener */
 
   fd_set master;
@@ -683,7 +665,7 @@ void p_thread_mgmt(void *ptr) {
             if(newfd > fdmax) {
               fdmax = newfd;
             }
-            printf("New connection from %s on socket %d\n", inet_ntoa(clientaddr.sin_addr), newfd);
+            syslog(LOG_INFO, "New connection from %s on socket %d\n", inet_ntoa(clientaddr.sin_addr), newfd);
 
             /* Send prompt on connection */
             if (friendly) { STREAM_SEND(newfd, MGMT_PROMPT) }
@@ -692,7 +674,7 @@ void p_thread_mgmt(void *ptr) {
           /* handle data from a client */
           if((nbytes = recv(i, buf, sizeof(buf), 0)) <= 0) {
             if(nbytes == 0) {
-              printf("socket %d hung up\n", i);
+              syslog(LOG_INFO, "Socket %d hung up\n", i);
             } else {
               perror("recv() error");
             }
@@ -700,7 +682,7 @@ void p_thread_mgmt(void *ptr) {
             close(i);
             FD_CLR(i, &master);
           } else {
-            printf("Found data: '%s'\n", buf);
+            syslog(LOG_DEBUG, "Found data: '%s'\n", buf);
             char *bufptr = &buf[0];
             if (strncasecmp(bufptr, (char *)"help", 4) == 0) {
               STREAM_SEND(i, MGMT_HELP)
@@ -785,17 +767,17 @@ void p_thread_mgmt(void *ptr) {
 
     /* end mgmt listener */
 
-  printf("Thread[Mgmt]: Ending thread %d\n", (int) *((int *) ptr));
+  syslog(LOG_INFO, "Thread[Mgmt]: Ending thread %d\n", (int) *((int *) ptr));
   pthread_exit(0);
 }
 
 void p_thread_stat(void *ptr) {
-  printf("Thread[Stat]: Starting thread %d\n", (int) *((int *) ptr));
+  syslog(LOG_INFO, "Thread[Stat]: Starting thread %d\n", (int) *((int *) ptr));
   while (1) {
     dump_stats();
     sleep(10);
   }
-  printf("Thread[Stat]: Ending thread %d\n", (int) *((int *) ptr));
+  syslog(LOG_INFO, "Thread[Stat]: Ending thread %d\n", (int) *((int *) ptr));
   pthread_exit(0);
 }
 
