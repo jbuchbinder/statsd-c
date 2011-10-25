@@ -34,15 +34,40 @@
  *
  * more doco here.
  *
- * basic useage might be:
+ * basic usage for gmond 3.1+ might be:
  * \code
- * gmetric g;
- * gmetric_message msg;
+ * gmetric_t g;
+ * gmetric_message_t msg;
  * gmetric_create(&g);
  * if (!gmetric_open(g, "localhost", 8649)) {
  *    exit(1);
  * }
  * foreach metric {
+ *    msg.hostname = "localhost";
+ *    msg.spoof = 0;
+ *    msg.type = GMETRIC_VALUE_STRING;
+ *    msg.name = "foo";
+ *    msg.group = "group";
+ *    msg.value.v_string = "bar";
+ *    msg.unit = "no units";
+ *    msg.slope = GMETRIC_SLOPE_BOTH;
+ *    msg.tmax = 120;
+ *    msg.dmax = 0;
+ *    gmetric_send(&g, &msg);
+ * }
+ * gmetric_close(g);
+ * \endcode
+ *
+ * basic usage for gmond < 3.1 might be:
+ * \code
+ * gmetric_t g;
+ * gmetric_message_t msg;
+ * gmetric_create(&g);
+ * if (!gmetric_open(g, "localhost", 8649)) {
+ *    exit(1);
+ * }
+ * foreach metric {
+ *    msg.format = GMETRIC_FORMAT_25;
  *    msg.type = GMETRIC_VALUE_STRING;
  *    msg.name = "foo";
  *    msg.value.v_string = "bar";
@@ -65,20 +90,21 @@
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <rpc/rpc.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define GMETRIC_MAX_MESSAGE_LEN 512
+#define GMETRIC_MAX_MESSAGE_LEN 1024
 
 typedef enum {
     GMETRIC_VALUE_UNKNOWN = 0,
-    GMETRIC_VALUE_STRING = 1,
-    GMETRIC_VALUE_UNSIGNED_SHORT = 2,
-    GMETRIC_VALUE_SHORT = 3,
+    GMETRIC_VALUE_UNSIGNED_SHORT = 1,
+    GMETRIC_VALUE_SHORT = 2,
+    GMETRIC_VALUE_INT = 3,
     GMETRIC_VALUE_UNSIGNED_INT = 4,
-    GMETRIC_VALUE_INT = 5,
+    GMETRIC_VALUE_STRING = 5,
     GMETRIC_VALUE_FLOAT = 6,
     GMETRIC_VALUE_DOUBLE = 7,
 } gmetric_value_t;
@@ -90,6 +116,11 @@ typedef enum {
     GMETRIC_SLOPE_BOTH = 3,
     GMETRIC_SLOPE_UNSPECIFIED = 4
 } gmetric_slope_t;
+
+typedef enum {
+    GMETRIC_FORMAT_25 = 0,
+    GMETRIC_FORMAT_31 = 1
+} gmetric_format_t;
 
 /**
  * Control structure and shared buffers
@@ -106,7 +137,11 @@ typedef struct
 typedef struct
 {
 	gmetric_value_t type;
+    gmetric_format_t format; /* Defaults to gmond 3.1.  Explicit set for older gmond format (2.5 to 3.0) */
+    const char* hostname;    /* Only used for gmond 3.1. */
+    bool_t spoof;            /* Only used for gmond 3.1. */
     const char* name;
+    const char* group;       /* Only used for gmond 3.1. */
     const char* units;
     const char* typestr;
     gmetric_slope_t slope;
@@ -149,12 +184,19 @@ int gmetric_open(gmetric_t* g, const char* addr, int port);
  */
 int gmetric_open_raw(gmetric_t* g, uint32_t ip, int port);
 
+/** \brief "destructor"
+ *
+ * \param[in] g the gmetric to close
+ */
+void gmetric_close(gmetric_t* g);
+
 /** \brief send a metric to the socket
  *
  * Must have called gmetric_create, gmetric_open first!
  *
- * This just wraps a call around gmetric_message_create_xdr and
- * gmetric_send_xdr.
+ * This just wraps a call around gmetadata_message_create_xdr, 
+ * gmetric31_message_create_xdr, and gmetric_send_xdr for gmond 3.1,
+ * and gmetric_message_create_xdr and gmetric_send_xdr for gmond 2.5.
  *
  * \param[in] g the socket to use
  * \param[in] msg the message to send
@@ -175,13 +217,7 @@ int gmetric_send(gmetric_t* g, const gmetric_message_t* msg);
  */
 int gmetric_send_xdr(gmetric_t* g, const char* buf, int len);
 
-/** \brief "destructor"
- *
- * \param[in] g the gmetric to close
- */
-void gmetric_close(gmetric_t* g);
-
-/** \brief struct to XDR message
+/** \brief struct to XDR message (gmond 2.5)
  *
  * Internal function but you may find it useful
  * for testing and experimenting
@@ -194,6 +230,31 @@ void gmetric_close(gmetric_t* g);
 int gmetric_message_create_xdr(char* buffer, uint len,
                                const gmetric_message_t* msg);
 
+/** \brief struct to XDR message (gmond 3.1)
+ *
+ * Internal function but you may find it useful
+ * for testing and experimenting
+ *
+ * \param[out] buffer
+ * \param[in]  len length of buffer
+ * \param[in] msg the gmetric_message to convert
+ * \return -1 on error, length of message on success
+ */
+int gmetadata_message_create_xdr(char* buffer, uint len,
+                                 const gmetric_message_t* msg);
+
+/** \brief struct to XDR message (gmond 3.1)
+ *
+ * Internal function but you may find it useful
+ * for testing and experimenting
+ *
+ * \param[out] buffer
+ * \param[in]  len length of buffer
+ * \param[in] msg the gmetric_message to convert
+ * \return -1 on error, length of message on success
+ */
+int gmetric31_message_create_xdr(char* buffer, uint len,
+                                 const gmetric_message_t* msg);
 
 /** \brief clear out a gmetric_message to know defaults
  *
@@ -211,3 +272,4 @@ int gmetric_message_validate(const gmetric_message_t* msg);
 #endif
 
 #endif
+

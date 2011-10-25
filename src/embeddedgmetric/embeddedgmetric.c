@@ -38,7 +38,11 @@
 #define CONVERT_TO_STRINGS
 
 static const char* typestrings[] = {
-    "", "string", "uint16", "int16", "uint32", "int32", "float", "double", "timestamp"
+    "", "uint16", "int16", "int32", "uint32", "string", "float", "double", "timestamp"
+};
+
+static const char* formatstrings[] = {
+    "", "%uh", "%h", "%d", "%u", "%s", "%f", "%lf", "%s"
 };
 /* TODO not sure how 'timestamp' is used */
 
@@ -122,7 +126,7 @@ int gmetric_message_create_xdr(char* buffer, uint len,
         return -1;
     }
 
-    if (!xdr_u_int(&x, (u_int*) &msg->slope)) {
+    if (!xdr_u_int(&x, (u_int*) (void*) &msg->slope)) {
         return -1;
     }
 
@@ -133,6 +137,160 @@ int gmetric_message_create_xdr(char* buffer, uint len,
     if (!xdr_u_int(&x, (u_int*) &msg->dmax)) {
         return -1;
     }
+
+    return xdr_getpos(&x);
+}
+
+int gmetadata_message_create_xdr(char* buffer, uint len,
+                                 const gmetric_message_t* msg)
+{
+    enum_t tmp = 128;
+    u_int tmp_int = 0;
+    const char *groupStr = "GROUP";
+    const char* typestr = typestrings[msg->type];
+    XDR x;
+    xdrmem_create(&x, buffer, len, XDR_ENCODE);
+
+    if (!xdr_enum (&x, (enum_t*) &tmp)) {
+        return -1;
+    }
+
+    if (!xdr_string(&x, (char**) &msg->hostname, ~0)) {
+        return -1;
+    }
+
+    if (!xdr_string(&x, (char**) &msg->name, ~0)) {
+        return -1;
+    }
+
+    if (!xdr_bool(&x, (bool_t*) &msg->spoof)) {
+        return -1;
+    }
+
+    if (msg->typestr && msg->typestr[0] != 0) {
+        typestr = msg->typestr;
+    }
+    if (!xdr_string(&x, (char**) &typestr, ~0)) {
+        return -1;
+    }
+
+    if (!xdr_string(&x, (char**) &msg->name, ~0)) {
+        return -1;
+    }
+
+    if (!xdr_string(&x, (char**) &msg->units, ~0)) {
+        return -1;
+    }
+
+    tmp_int = (u_int) msg->slope;
+    if (!xdr_u_int(&x, (u_int*) &tmp_int)) {
+        return -1;
+    }
+
+    if (!xdr_u_int(&x, (u_int*) &msg->tmax)) {
+        return -1;
+    }
+
+    if (!xdr_u_int(&x, (u_int*) &msg->dmax)) {
+        return -1;
+    }
+
+    if (msg->group == NULL || msg->group[0] == 0) {
+        tmp_int = 0;
+
+         if (!xdr_u_int(&x, (u_int*) &tmp_int)) {
+            return -1;
+         }
+    } else {
+        tmp_int = 1;
+
+         if (!xdr_u_int(&x, (u_int*) &tmp_int)) {
+            return -1;
+         }
+
+        if (!xdr_string(&x, (char**) &groupStr, ~0)) {
+            return -1;
+        }
+
+        if (!xdr_string(&x, (char**) &msg->group, ~0)) {
+            return -1;
+        }
+    }
+
+    return xdr_getpos(&x);
+}
+
+int gmetric31_message_create_xdr(char* buffer, uint len,
+                                 const gmetric_message_t* msg)
+{
+    enum_t tmp = 128;
+    const char* formatstr = formatstrings[msg->type];
+    XDR x;
+    xdrmem_create(&x, buffer, len, XDR_ENCODE);
+
+    tmp += (enum_t)msg->type;
+    if (!xdr_enum (&x, (enum_t*) &tmp)) {
+        return -1;
+    }
+
+    if (!xdr_string(&x, (char**) &msg->hostname, ~0)) {
+        return -1;
+    }
+
+    if (!xdr_string(&x, (char**) &msg->name, ~0)) {
+        return -1;
+    }
+
+    if (!xdr_bool(&x, (bool_t*) &msg->spoof)) {
+        return -1;
+    }
+
+    if (!xdr_string(&x, (char**) &formatstr, ~0)) {
+        return -1;
+    }
+
+    switch (msg->type) {
+    case GMETRIC_VALUE_UNSIGNED_SHORT:
+        if (!xdr_u_short(&x, (u_short *) &msg->value.v_ushort)) {
+            return -1;
+        }
+        break;
+    case GMETRIC_VALUE_SHORT:
+        if (!xdr_short(&x, (short int *) &msg->value.v_short)) {
+            return -1;
+        }
+        break;
+    case GMETRIC_VALUE_UNSIGNED_INT:
+        if (!xdr_u_int(&x, (u_int *) &msg->value.v_uint)) {
+            return -1;
+        }
+        break;
+    case GMETRIC_VALUE_INT:
+        if (!xdr_int(&x, (int *) &msg->value.v_int)) {
+            return -1;
+        }
+        break;
+    case GMETRIC_VALUE_FLOAT:
+        if (!xdr_float(&x, (float *) &msg->value.v_float)) {
+            return -1;
+        }
+        break;
+    case GMETRIC_VALUE_DOUBLE:
+        if (!xdr_double(&x, (double *) &msg->value.v_double)) {
+            return -1;
+        }
+        break;
+    case GMETRIC_VALUE_STRING:
+        if (!xdr_string(&x, (char**) &msg->value.v_string, ~0)) {
+            return -1;
+        }
+        break;
+    case GMETRIC_VALUE_UNKNOWN:
+        if (!xdr_string(&x, (char**) &msg->value.v_string, ~0)) {
+            return -1;
+        }
+        break;
+    }  /* end switch */
 
     return xdr_getpos(&x);
 }
@@ -213,8 +371,29 @@ int gmetric_send_xdr(gmetric_t* g, const char* buf, int len)
 int gmetric_send(gmetric_t* g, const gmetric_message_t* msg)
 {
     char buf[GMETRIC_MAX_MESSAGE_LEN];
-    int len = gmetric_message_create_xdr(buf, sizeof(buf), msg);
-    return gmetric_send_xdr(g, buf, len);
+    int len = 0;
+    int result1 = -1, result2 = -1;
+
+    if (msg->format == GMETRIC_FORMAT_31) {
+        len = gmetadata_message_create_xdr(buf, sizeof(buf), msg);
+        result1 = gmetric_send_xdr(g, buf, len);
+
+        if (result1 == -1) {
+            return result1;
+        }
+
+        len = gmetric31_message_create_xdr(buf, sizeof(buf), msg);
+        result2 = gmetric_send_xdr(g, buf, len);
+
+        if (result2 == -1) {
+           return result2;
+        }
+
+        return result1 = result2;
+    } else {
+        len = gmetric_message_create_xdr(buf, sizeof(buf), msg);
+        return gmetric_send_xdr(g, buf, len);
+    }
 }
 
 /**
@@ -231,7 +410,11 @@ void gmetric_close(gmetric_t* g)
 void gmetric_message_clear(gmetric_message_t* msg)
 {
     msg->type = GMETRIC_VALUE_UNKNOWN;
+    msg->format = GMETRIC_FORMAT_31;
+    msg->hostname = "";
+    msg->spoof = 0;
     msg->name = "";
+    msg->group = "";
     msg->units = "";
     msg->typestr = "";
     msg->slope = GMETRIC_SLOPE_BOTH;
@@ -239,3 +422,31 @@ void gmetric_message_clear(gmetric_message_t* msg)
     msg->dmax = 0;
     msg->value.v_double = 0;
 }
+
+int gmetric_message_validate(const gmetric_message_t* msg)
+{
+    if (msg->format == GMETRIC_FORMAT_31 &&
+        (msg->hostname == NULL || msg->hostname[0] == 0)) {
+        return 0;
+    }
+
+    if (msg->type == GMETRIC_VALUE_UNKNOWN) {
+        return 0;
+    }
+
+    if (msg->name == NULL || msg->name[0] == 0) {
+        return 0;
+    }
+
+    if (msg->units == NULL || msg->units[0] == 0) {
+        return 0;
+    }
+
+    if (msg->type == GMETRIC_VALUE_STRING &&
+        (msg->value.v_string == NULL || msg->value.v_string[0] == 0)) {
+        return 0;
+    }
+
+    return 1;
+}
+
