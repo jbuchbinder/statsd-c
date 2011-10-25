@@ -871,9 +871,21 @@ void p_thread_flush(void *ptr) {
       wait_for_timers_lock();
       HASH_ITER(hh, timers, s_timer, tmp) {
         if (s_timer->count > 0) {
-          int pctThreshold = 90; /* TODO FIXME */
-          double min = 0; /* TODO FIXME */
-          double max = 1; /* TODO FIXME */
+          int pctThreshold = 90; /* TODO FIXME: dynamic assignment */
+          double min;
+          double max;
+          {
+            int i;
+            for(i = 0; i < s_timer->count; i++) {
+              if (i == 0) {
+                min = s_timer->values[i];
+                max = s_timer->values[i];
+              } else {
+                if (s_timer->values[i] < min) min = s_timer->values[i];
+                if (s_timer->values[i] > max) max = s_timer->values[i];
+              }
+            } 
+          }
 
           double mean = min;
           double maxAtThreshold = max;
