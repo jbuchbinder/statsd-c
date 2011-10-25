@@ -85,6 +85,7 @@
 	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
 	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
+	msg.format = GMETRIC_FORMAT_31; \
 	msg.type = GMETRIC_VALUE_DOUBLE; \
 	msg.name = myname; \
 	msg.value.v_double = myvalue; \
@@ -104,6 +105,7 @@
 	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
 	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
+	msg.format = GMETRIC_FORMAT_31; \
 	msg.type = GMETRIC_VALUE_INT; \
 	msg.name = myname; \
 	msg.value.v_double = myvalue; \
@@ -123,6 +125,7 @@
 	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
 	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
+	msg.format = GMETRIC_FORMAT_31; \
 	msg.type = GMETRIC_VALUE_STRING; \
 	msg.name = myname; \
 	msg.value.v_double = myvalue; \
@@ -857,8 +860,10 @@ void p_thread_flush(void *ptr) {
       wait_for_counters_lock();
       HASH_ITER(hh, counters, s_counter, tmp) {
         long double value = s_counter->value / flush_interval;
+#ifdef SEND_GRAPHITE
         char *message = malloc(sizeof(char) * BUFLEN);
-        sprintf(message, "stats.%s %Lf %ld\nstats_counts.%s %Lf %ld\n", s_counter->key, value, ts, s_counter->key, s_counter->value, ts);
+        sprintf(message, "stats.%s %Lf %ld\nstats_counts_%s %Lf %ld\n", s_counter->key, value, ts, s_counter->key, s_counter->value, ts);
+#endif
         if (enable_gmetric) {
           {
             char *k = malloc(strlen(s_counter->key) + 6);
@@ -873,12 +878,14 @@ void p_thread_flush(void *ptr) {
             if (k) free(k);
           }
         }
+#ifdef SEND_GRAPHITE
         if (statString) {
           statString = realloc(statString, strlen(statString) + strlen(message));
           strcat(statString, message);
         } else {
           statString = strdup(message);
         }
+#endif
 
         /* Clear counter after we're done with it */
         s_counter->value = 0;
@@ -927,6 +934,7 @@ void p_thread_flush(void *ptr) {
             mean = sum / numInThreshold;
           }
 
+#ifdef SEND_GRAPHITE
           char *message = malloc(sizeof(char) * BUFLEN);
           sprintf(message, "stats.timers.%s.mean %f %ld\n"
             "stats.timers.%s.upper %f %ld\n"
@@ -939,6 +947,7 @@ void p_thread_flush(void *ptr) {
             s_timer->key, min, ts,
             s_timer->key, s_timer->count, ts
           );
+#endif
           if (enable_gmetric) {
             {
               char *k = malloc(strlen(s_timer->key) + 18);
@@ -971,12 +980,14 @@ void p_thread_flush(void *ptr) {
               if (k) free(k);
             }
           }
+#ifdef SEND_GRAPHITE
           if (statString) {
             statString = realloc(statString, strlen(statString) + strlen(message));
             strcat(statString, message);
           } else {
             statString = strdup(message);
           }
+#endif
         }
         numStats++;
       }
@@ -986,28 +997,36 @@ void p_thread_flush(void *ptr) {
     }
 
     {
+#ifdef SEND_GRAPHITE
       char *message = malloc(sizeof(char) * BUFLEN);
       sprintf(message, "statsd.numStats %d %ld\n", numStats, ts);
+#endif
       if (enable_gmetric) {
         SEND_GMETRIC_DOUBLE("statd_numStats", numStats, "no units");
       }
+#ifdef SEND_GRAPHITE
       if (statString) {
         statString = realloc(statString, strlen(statString) + strlen(message));
         strcat(statString, message);
       } else {
         statString = strdup(message);
       }
+#endif
     }
 
     /* TODO: Flush to graphite */
+#ifdef SEND_GRAPHITE
     printf("Messages:\n%s", statString);
+#endif
 
     if (enable_gmetric) {
       gmetric_close(&gm);
     }
 
     if (ts_string) free(ts_string);
+#ifdef SEND_GRAPHITE
     if (statString) free(statString);
+#endif
   }
 
   syslog(LOG_INFO, "Thread[Flush]: Ending thread %d\n", (int) *((int *) ptr));
