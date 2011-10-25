@@ -4,7 +4,7 @@ STATSD-C
 SUMMARY
 -------
 
-Reimplementation of Etsy's infamous "statsd" in C.
+Reimplementation of [Etsy's infamous "statsd"](http://github.com/etsy/statsd) in C.
 
 Your mileage may vary. It works for me, and it *should* be wire compatible with the original node.js-based statsd.
 
