@@ -39,7 +39,7 @@
 /* Define stat flush interval in ms */
 #define FLUSH_INTERVAL 10000
 
-#define THREAD_USLEEP(x) { pthread_mutex_t fakeMutex = PTHREAD_MUTEX_INITIALIZER; pthread_cond_t fakeCond = PTHREAD_COND_INITIALIZER; struct timespec timeToWait; struct timeval now; int rt; gettimeofday(&now,NULL); timeToWait.tv_sec = now.tv_sec + (x / 1000); timeToWait.tv_nsec = now.tv_usec * 1000; pthread_mutex_lock(&fakeMutex); rt = pthread_cond_timedwait(&fakeCond, &fakeMutex, &timeToWait); if (rt != 0) { syslog(LOG_ERR, "Failed to wait"); } pthread_mutex_unlock(&fakeMutex); }
+#define THREAD_USLEEP(x) { pthread_mutex_t fakeMutex = PTHREAD_MUTEX_INITIALIZER; pthread_cond_t fakeCond = PTHREAD_COND_INITIALIZER; struct timespec timeToWait; struct timeval now; int rt; gettimeofday(&now,NULL); timeToWait.tv_sec = now.tv_sec + (x / 1000); timeToWait.tv_nsec = now.tv_usec * 1000; pthread_mutex_lock(&fakeMutex); rt = pthread_cond_timedwait(&fakeCond, &fakeMutex, &timeToWait); if (rt != 0) { } pthread_mutex_unlock(&fakeMutex); }
 #define STREAM_SEND(x,y) if (send(x, y, strlen(y), 0) == -1) { perror("send error"); }
 #define STREAM_SEND_LONG(x,y) { \
 	char *z = malloc(sizeof(char *)); \
@@ -859,6 +859,10 @@ void p_thread_flush(void *ptr) {
         } else {
           statString = strdup(message);
         }
+
+        /* Clear counter after we're done with it */
+        s_counter->value = 0;
+
         numStats++;
       }
       remove_counters_lock();
@@ -915,6 +919,38 @@ void p_thread_flush(void *ptr) {
             s_timer->key, min, ts,
             s_timer->key, s_timer->count, ts
           );
+          if (enable_gmetric) {
+            {
+              char *k = malloc(strlen(s_timer->key) + 18);
+              sprintf(k, "stats_timers_%s_mean", s_timer->key);
+              SEND_GMETRIC_DOUBLE(k, mean, "no units");
+              if (k) free(k);
+            }
+            {
+              char *k = malloc(strlen(s_timer->key) + 19);
+              sprintf(k, "stats_timers_%s_upper", s_timer->key);
+              SEND_GMETRIC_DOUBLE(k, max, "no units");
+              if (k) free(k);
+            }
+            {
+              char *k = malloc(strlen(s_timer->key) + 30);
+              sprintf(k, "stats_timers_%s_upper_%d", s_timer->key, pctThreshold);
+              SEND_GMETRIC_DOUBLE(k, maxAtThreshold, "no units");
+              if (k) free(k);
+            }
+            {
+              char *k = malloc(strlen(s_timer->key) + 19);
+              sprintf(k, "stats_timers_%s_lower", s_timer->key);
+              SEND_GMETRIC_DOUBLE(k, min, "no units");
+              if (k) free(k);
+            }
+            {
+              char *k = malloc(strlen(s_timer->key) + 19);
+              sprintf(k, "stats_timers_%s_count", s_timer->key);
+              SEND_GMETRIC_INT(k, s_timer->count, "no units");
+              if (k) free(k);
+            }
+          }
           if (statString) {
             statString = realloc(statString, strlen(statString) + strlen(message));
             strcat(statString, message);
@@ -932,6 +968,9 @@ void p_thread_flush(void *ptr) {
     {
       char *message = malloc(sizeof(char) * BUFLEN);
       sprintf(message, "statsd.numStats %d %ld\n", numStats, ts);
+      if (enable_gmetric) {
+        SEND_GMETRIC_DOUBLE("statd_numStats", numStats, "no units");
+      }
       if (statString) {
         statString = realloc(statString, strlen(statString) + strlen(message));
         strcat(statString, message);
@@ -940,7 +979,7 @@ void p_thread_flush(void *ptr) {
       }
     }
 
-    /* TODO: Flush to stats collector(s) */
+    /* TODO: Flush to graphite */
     printf("Messages:\n%s", statString);
 
     if (enable_gmetric) {
