@@ -83,7 +83,7 @@
 
 #define SEND_GMETRIC_DOUBLE(myname, myvalue, myunit) { \
 	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
-	char *bufptr = &buf; \
+	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
 	msg.type = GMETRIC_VALUE_DOUBLE; \
 	msg.name = myname; \
@@ -102,7 +102,7 @@
 	}
 #define SEND_GMETRIC_INT(myname, myvalue, myunit) { \
 	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
-	char *bufptr = &buf; \
+	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
 	msg.type = GMETRIC_VALUE_INT; \
 	msg.name = myname; \
@@ -121,7 +121,7 @@
 	}
 #define SEND_GMETRIC_STRING(myname, myvalue, myunit) { \
 	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
-	char *bufptr = &buf; \
+	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
 	msg.type = GMETRIC_VALUE_STRING; \
 	msg.name = myname; \
