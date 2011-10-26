@@ -16,6 +16,14 @@ There are some libraries used/included:
 
 Build with "make".
 
+FEATURES
+--------
+
+* Wire compatible with original statsd.
+* Small, fast, efficient, with no VM overhead.
+* Able to de/serialize state to/from disk.
+* Direct stat flush to ganglia's gmond.
+
 USAGE
 -----
 
