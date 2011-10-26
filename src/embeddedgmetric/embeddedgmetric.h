@@ -100,11 +100,11 @@ extern "C" {
 
 typedef enum {
     GMETRIC_VALUE_UNKNOWN = 0,
-    GMETRIC_VALUE_UNSIGNED_SHORT = 1,
-    GMETRIC_VALUE_SHORT = 2,
-    GMETRIC_VALUE_INT = 3,
+    GMETRIC_VALUE_STRING = 1,
+    GMETRIC_VALUE_UNSIGNED_SHORT = 2,
+    GMETRIC_VALUE_SHORT = 3,
     GMETRIC_VALUE_UNSIGNED_INT = 4,
-    GMETRIC_VALUE_STRING = 5,
+    GMETRIC_VALUE_INT = 5,
     GMETRIC_VALUE_FLOAT = 6,
     GMETRIC_VALUE_DOUBLE = 7,
 } gmetric_value_t;
@@ -136,7 +136,7 @@ typedef struct
  */
 typedef struct
 {
-	gmetric_value_t type;
+    gmetric_value_t type;
     gmetric_format_t format; /* Defaults to gmond 3.1.  Explicit set for older gmond format (2.5 to 3.0) */
     const char* hostname;    /* Only used for gmond 3.1. */
     bool_t spoof;            /* Only used for gmond 3.1. */
