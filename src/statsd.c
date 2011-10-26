@@ -82,61 +82,58 @@
  */
 
 #define SEND_GMETRIC_DOUBLE(myname, myvalue, myunit) { \
-	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
-	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
 	msg.format = GMETRIC_FORMAT_31; \
 	msg.type = GMETRIC_VALUE_DOUBLE; \
 	msg.name = myname; \
+	msg.hostname = ganglia_spoof; \
 	msg.value.v_double = myvalue; \
 	msg.units = myunit; \
 	msg.slope = GMETRIC_SLOPE_BOTH; \
 	msg.tmax = flush_interval; \
 	msg.dmax = 0; \
-	int len = gmetric_message_create_xdr(bufptr, sizeof(buf), &msg); \
+	msg.spoof = 1; \
+	int len = gmetric_send(&gm, &msg); \
 	if (len != -1) { \
-		syslog(LOG_INFO, "Sending gmetric message length %d", len); \
-		gmetric_send_xdr(&gm, bufptr, len); \
+		syslog(LOG_INFO, "Sending gmetric DOUBLE message %s length %d", myname, len); \
 	} else { \
 		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
 	}
 #define SEND_GMETRIC_INT(myname, myvalue, myunit) { \
-	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
-	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
 	msg.format = GMETRIC_FORMAT_31; \
 	msg.type = GMETRIC_VALUE_INT; \
 	msg.name = myname; \
+	msg.hostname = ganglia_spoof; \
 	msg.value.v_double = myvalue; \
 	msg.units = myunit; \
 	msg.slope = GMETRIC_SLOPE_BOTH; \
 	msg.tmax = flush_interval; \
 	msg.dmax = 0; \
-	int len = gmetric_message_create_xdr(bufptr, sizeof(buf), &msg); \
+	msg.spoof = 1; \
+	int len = gmetric_send(&gm, &msg); \
 	if (len != -1) { \
-		syslog(LOG_INFO, "Sending gmetric message length %d", len); \
-		gmetric_send_xdr(&gm, bufptr, len); \
+		syslog(LOG_INFO, "Sending gmetric INT message %s length %d", myname, len); \
 	} else { \
 		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
 	}
 #define SEND_GMETRIC_STRING(myname, myvalue, myunit) { \
-	char buf[GMETRIC_MAX_MESSAGE_LEN]; \
-	char *bufptr = &buf[0]; \
 	gmetric_message_t msg; \
 	msg.format = GMETRIC_FORMAT_31; \
 	msg.type = GMETRIC_VALUE_STRING; \
 	msg.name = myname; \
+	msg.hostname = ganglia_spoof; \
 	msg.value.v_double = myvalue; \
 	msg.units = myunit; \
 	msg.slope = GMETRIC_SLOPE_BOTH; \
 	msg.tmax = flush_interval; \
 	msg.dmax = 0; \
-	int len = gmetric_message_create_xdr(bufptr, sizeof(buf), &msg); \
+	msg.spoof = 1; \
+	int len = gmetric_send(&gm, &msg); \
 	if (len != -1) { \
-		syslog(LOG_INFO, "Sending metric message length %d", len); \
-		gmetric_send_xdr(&gm, bufptr, len); \
+		syslog(LOG_INFO, "Sending gmetric STRING message %s length %d", myname, len); \
 	} else { \
 		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
@@ -160,7 +157,7 @@ pthread_t thread_mgmt;
 pthread_t thread_flush;
 int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT, flush_interval = FLUSH_INTERVAL;
 int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0, enable_gmetric = 0;
-char *serialize_file = NULL, *ganglia_host = NULL;
+char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL;
 
 /*
  * FUNCTION PROTOTYPES
@@ -248,7 +245,7 @@ int main(int argc, char *argv[]) {
   sem_init(&timers_lock, 0, 1);
   sem_init(&counters_lock, 0, 1);
 
-  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:")) != -1) {
+  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:")) != -1) {
     switch (opt) {
       case 'd':
         printf("Debug enabled.\n");
@@ -291,13 +288,18 @@ int main(int argc, char *argv[]) {
         ganglia_port = atoi(optarg);
         printf("Ganglia port %d\n", ganglia_port);
         break;
+      case 'S':
+        ganglia_spoof = strdup(optarg);
+        printf("Ganglia spoof host %s\n", ganglia_spoof);
+        break;
       case 'h':
-        fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost]\n", argv[0]);
         fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
         fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
         fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
         fprintf(stderr, "\t-G host           ganglia host (default disabled)\n");
         fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
+        fprintf(stderr, "\t-S spoofhost      ganglia spoof host (default statsd:statsd)\n");
         fprintf(stderr, "\t-h                this help display\n");
         fprintf(stderr, "\t-d                enable debug\n");
         fprintf(stderr, "\t-D                daemonize\n");
@@ -308,6 +310,10 @@ int main(int argc, char *argv[]) {
       default:
         break;
     }
+  }
+
+  if (ganglia_spoof == NULL) {
+    ganglia_spoof = strdup("statsd:statsd");
   }
 
   if (debug) {
@@ -853,7 +859,9 @@ void p_thread_flush(void *ptr) {
     long ts = time(NULL);
     char *ts_string = ltoa(ts);
     int numStats = 0;
+#ifdef SEND_GRAPHITE
     char *statString = NULL;
+#endif
 
     {
       statsd_counter_t *s_counter, *tmp;
