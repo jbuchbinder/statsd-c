@@ -22,6 +22,7 @@
 #include <syslog.h>
 #include <unistd.h>
 
+#include "json-c/json.h"
 #include "statsd.h"
 #include "serialize.h"
 #include "stats.h"
@@ -58,6 +59,9 @@ void add_timer( char *key, double value );
 void update_stat( char *group, char *key, char *value);
 void update_counter( char *key, double value, double sample_rate );
 void update_timer( char *key, double value );
+void process_stats_packet(char buf_in[]);
+void process_json_stats_packet(char buf_in[]);
+void process_json_stats_object(json_object *sobj);
 void dump_stats();
 void p_thread_udp(void *ptr);
 void p_thread_mgmt(void *ptr);
@@ -376,6 +380,74 @@ void dump_stats() {
   }
 }
 
+void process_json_stats_packet(char buf_in[]) {
+  if (strlen(buf_in) < 2) {
+    UPDATE_LAST_MSG_SEEN()
+    return;
+  }
+
+  json_object *obj = json_tokener_parse(&buf_in[0]);
+  if (!obj) {
+    syslog(LOG_ERR, "Bad JSON object, skipping");
+    return;
+  }
+
+  if (json_object_get_type(obj) == json_type_object) {
+    syslog(LOG_DEBUG, "Processing single stats object");
+    process_json_stats_object(obj);
+  } else if (json_object_get_type(obj) == json_type_array) {
+    int i;
+    for (i=0; i<json_object_array_length(obj); i++) {
+      syslog(LOG_DEBUG, "Iterating through objects at pos %d", i);
+      process_json_stats_object(json_object_array_get_idx(obj, i));
+    }
+  } else {
+    syslog(LOG_ERR, "Bad JSON data presented");
+  }
+}
+
+void process_json_stats_object(json_object *sobj) {
+  syslog(LOG_INFO, "Processing stat %s", json_object_to_json_string(sobj));
+
+  json_object *timer_obj = json_object_object_get(sobj, "timer");
+  json_object *counter_obj = json_object_object_get(sobj, "counter");
+
+  if (timer_obj && counter_obj) {
+    syslog(LOG_ERR, "Can't specify both timer and counter in same object");
+    return;
+  }
+
+  if (timer_obj) {
+    json_object *value_obj = json_object_object_get(sobj, "value");
+
+    if (!timer_obj || !value_obj) {
+      syslog(LOG_ERR, "Could not process, requires timer && value attributes");
+      return;
+    }
+
+    char *key_name = (char *) json_object_get_string(timer_obj);
+    sanitize_key(key_name);
+    double value = json_object_get_double(value_obj);
+
+    update_timer(key_name, value);
+  } else if (counter_obj) {
+    json_object *value_obj = json_object_object_get(sobj, "value");
+    json_object *sample_rate_obj = json_object_object_get(sobj, "sample_rate");
+
+    if (!counter_obj || !value_obj) {
+      syslog(LOG_ERR, "Could not process, requires counter && value attributes");
+      return;
+    }
+
+    char *key_name = (char *) json_object_get_string(counter_obj);
+    sanitize_key(key_name);
+    double value = json_object_get_double(value_obj);
+    double sample_rate = sample_rate_obj ? json_object_get_double(sample_rate_obj) : 0;
+
+    update_counter(key_name, value, sample_rate);
+  }
+}
+
 void process_stats_packet(char buf_in[]) {
   char *key_name = NULL;
 
@@ -538,7 +610,13 @@ void p_thread_udp(void *ptr) {
         syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n", 
             inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf_in);
 
-        process_stats_packet(buf_in);
+        if (buf_in[0] == '{' || buf_in[0] == '[') {
+          syslog(LOG_DEBUG, "UDP: Processing as JSON packet");
+          process_json_stats_packet(buf_in);
+        } else {
+          syslog(LOG_DEBUG, "UDP: Processing as standard packet");
+          process_stats_packet(buf_in);
+        }
       }
     }
 
