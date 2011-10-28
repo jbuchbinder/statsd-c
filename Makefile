@@ -20,6 +20,16 @@ OBJECTS= \
 	src/json-c/linkhash.o \
 	src/json-c/printbuf.o
 
+CLIENT_BINARY= statsd_client
+CLIENT_OBJECTS= \
+	src/statsd_client.o
+
+ALL_COMPILED_OBJECTS= \
+	$(BINARY) \
+	$(CLIENT_BINARY) \
+	$(OBJECTS) \
+	$(CLIENT_OBJECTS)
+
 # Compilation settings
 CC= gcc
 CFLAGS= -fPIC -Wall -pthread -lpthread \
@@ -32,17 +42,21 @@ UNBOLD=\033[0m
 
 all: compile
 
-compile: clean statsd
+compile: clean $(BINARY) $(CLIENT_BINARY)
 
 clean:
-	@for F in $(BINARY) $(OBJECTS); do \
+	@for F in $(ALL_COMPILED_OBJECTS); do \
 		echo " RM $(BOLD)$$F $(UNBOLD)"; \
 		rm -f $$F; \
 	done
 
 $(BINARY): $(OBJECTS)
 	@echo " LD $(BOLD)$(BINARY)$(UNBOLD)"
-	@$(CC) $(CFLAGS) -o $(BINARY) $(OBJECTS)
+	@$(CC) $(CFLAGS) -o $@ $(OBJECTS)
+
+$(CLIENT_BINARY): $(CLIENT_OBJECTS)
+	@echo " LD $(BOLD)$(CLIENT_BINARY)$(UNBOLD)"
+	@$(CC) $(CFLAGS) -o $@ $(CLIENT_OBJECTS)
 
 .c.o:
 	@echo " CC $(BOLD)$@$(UNBOLD)"
