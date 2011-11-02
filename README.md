@@ -28,13 +28,14 @@ FEATURES
 USAGE
 -----
 
-    Usage: statsd [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost]
+    Usage: statsd [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix]
         -p port           set statsd udp listener port (default 8125)
         -m port           set statsd management port (default 8126)
         -s file           serialize state to and from file (default disabled)
         -G host           ganglia host (default disabled)
         -g port           ganglia port (default 8649)
         -S spoofhost      ganglia spoof host (default statsd:statsd)
+        -P prefix         ganglia metric prefix (default is none)
         -h                this help display
         -d                enable debug
         -D                daemonize

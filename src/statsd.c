@@ -49,7 +49,7 @@ pthread_t thread_mgmt;
 pthread_t thread_flush;
 int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT, flush_interval = FLUSH_INTERVAL;
 int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0, enable_gmetric = 0;
-char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL;
+char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL, *ganglia_metric_prefix = NULL;
 
 /*
  * FUNCTION PROTOTYPES
@@ -140,7 +140,7 @@ int main(int argc, char *argv[]) {
   sem_init(&timers_lock, 0, 1);
   sem_init(&counters_lock, 0, 1);
 
-  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:")) != -1) {
+  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:P:")) != -1) {
     switch (opt) {
       case 'd':
         printf("Debug enabled.\n");
@@ -187,14 +187,19 @@ int main(int argc, char *argv[]) {
         ganglia_spoof = strdup(optarg);
         printf("Ganglia spoof host %s\n", ganglia_spoof);
         break;
+      case 'P':
+        ganglia_metric_prefix = strdup(optarg);
+        printf("Ganglia metric prefix %s\n", ganglia_metric_prefix);
+        break;
       case 'h':
-        fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix]\n", argv[0]);
         fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
         fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
         fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
         fprintf(stderr, "\t-G host           ganglia host (default disabled)\n");
         fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
         fprintf(stderr, "\t-S spoofhost      ganglia spoof host (default statsd:statsd)\n");
+        fprintf(stderr, "\t-P prefix         ganglia metric prefix (default is none)\n");
         fprintf(stderr, "\t-h                this help display\n");
         fprintf(stderr, "\t-d                enable debug\n");
         fprintf(stderr, "\t-D                daemonize\n");
@@ -843,8 +848,14 @@ void p_thread_flush(void *ptr) {
 #endif
         if (enable_gmetric) {
           {
-            char *k = malloc(strlen(s_counter->key) + 6);
-            sprintf(k, "stats_%s", s_counter->key);
+            char *k = NULL;
+            if (ganglia_metric_prefix != NULL) {
+              k = malloc(strlen(s_counter->key) + strlen(ganglia_metric_prefix));
+              sprintf(k, "%s%s", ganglia_metric_prefix, s_counter->key);
+            } else {
+              k = malloc(strlen(s_counter->key));
+              k = strdup(s_counter->key);
+            }
             SEND_GMETRIC_DOUBLE(k, value, "no units");
             if (k) free(k);
           }
