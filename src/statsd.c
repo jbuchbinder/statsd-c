@@ -43,7 +43,6 @@ statsd_timer_t *timers = NULL;
 sem_t timers_lock;
 
 int stats_udp_socket, stats_mgmt_socket;
-pthread_t thread_stat;
 pthread_t thread_udp;
 pthread_t thread_mgmt;
 pthread_t thread_flush;
@@ -65,7 +64,6 @@ void process_json_stats_object(json_object *sobj);
 void dump_stats();
 void p_thread_udp(void *ptr);
 void p_thread_mgmt(void *ptr);
-void p_thread_stat(void *ptr);
 void p_thread_flush(void *ptr);
 
 void init_stats() {
@@ -88,7 +86,6 @@ void init_stats() {
 
 void cleanup() {
   pthread_cancel(thread_flush);
-  pthread_cancel(thread_stat);
   pthread_cancel(thread_udp);
   pthread_cancel(thread_mgmt);
 
@@ -130,7 +127,7 @@ void sigquit_handler (int signum) {
 }
 
 int main(int argc, char *argv[]) {
-  int pids[4] = { 1, 2, 3, 4 };
+  int pids[4] = { 1, 2, 3 };
   int opt;
 
   signal (SIGINT, sigint_handler);
@@ -227,12 +224,10 @@ int main(int argc, char *argv[]) {
   /* Initialization of certain stats, here. */
   init_stats();
 
-  pthread_create (&thread_stat,  NULL, (void *) &p_thread_stat,  (void *) &pids[0]);
-  pthread_create (&thread_udp,   NULL, (void *) &p_thread_udp,   (void *) &pids[1]);
-  pthread_create (&thread_mgmt,  NULL, (void *) &p_thread_mgmt,  (void *) &pids[2]);
-  pthread_create (&thread_flush, NULL, (void *) &p_thread_flush, (void *) &pids[3]);
+  pthread_create (&thread_udp,   NULL, (void *) &p_thread_udp,   (void *) &pids[0]);
+  pthread_create (&thread_mgmt,  NULL, (void *) &p_thread_mgmt,  (void *) &pids[1]);
+  pthread_create (&thread_flush, NULL, (void *) &p_thread_flush, (void *) &pids[2]);
 
-  pthread_join(thread_stat,  NULL);
   pthread_join(thread_udp,   NULL);
   pthread_join(thread_mgmt,  NULL);
   pthread_join(thread_flush, NULL);
@@ -804,16 +799,6 @@ void p_thread_mgmt(void *ptr) {
   pthread_exit(0);
 }
 
-void p_thread_stat(void *ptr) {
-  syslog(LOG_INFO, "Thread[Stat]: Starting thread %d\n", (int) *((int *) ptr));
-  while (1) {
-    dump_stats();
-    sleep(10);
-  }
-  syslog(LOG_INFO, "Thread[Stat]: Ending thread %d\n", (int) *((int *) ptr));
-  pthread_exit(0);
-}
-
 void p_thread_flush(void *ptr) {
   syslog(LOG_INFO, "Thread[Flush]: Starting thread %d\n", (int) *((int *) ptr));
 
@@ -821,6 +806,8 @@ void p_thread_flush(void *ptr) {
     THREAD_SLEEP(flush_interval);
 
     gmetric_t gm;
+
+    dump_stats();
 
     if (enable_gmetric) {
       gmetric_create(&gm);
