@@ -237,12 +237,13 @@ int main(int argc, char *argv[]) {
 
 void add_timer( char *key, double value ) {
   statsd_timer_t *t;
-  wait_for_timers_lock();
   HASH_FIND_STR( timers, key, t );
   if (t) {
     /* Add to old entry */
-    int pos = t->count++;
-    t->values[pos - 1] = value;
+    wait_for_timers_lock();
+    t->count++;
+    t->values[t->count - 1] = value;
+    remove_timers_lock();
   } else {
     /* Create new entry */
     t = malloc(sizeof(statsd_timer_t));
@@ -251,9 +252,10 @@ void add_timer( char *key, double value ) {
     t->count = 1;
     t->values[t->count - 1] = value;
 
+    wait_for_timers_lock();
     HASH_ADD_STR( timers, key, t );
+    remove_timers_lock();
   }
-  remove_timers_lock();
 }
 
 /**
@@ -264,8 +266,6 @@ void update_stat( char *group, char *key, char *value ) {
   statsd_stat_t *s;
   statsd_stat_name_t l;
 
-  wait_for_stats_lock();
-
   memset(&l, 0, sizeof(statsd_stat_name_t));
   strcpy(l.group_name, group);
   strcpy(l.key_name, key);
@@ -275,7 +275,9 @@ void update_stat( char *group, char *key, char *value ) {
   if (s) {
     syslog(LOG_DEBUG, "Updating old stat entry");
 
+    wait_for_stats_lock();
     s->value = atol( value );
+    remove_stats_lock();
   } else {
     syslog(LOG_DEBUG, "Adding new stat entry");
     s = malloc(sizeof(statsd_stat_t));
@@ -286,9 +288,10 @@ void update_stat( char *group, char *key, char *value ) {
     s->value = atol(value);
     s->locked = 0;
 
+    wait_for_stats_lock();
     HASH_ADD( hh, stats, name, sizeof(statsd_stat_name_t), s );
+    remove_stats_lock();
   }
-  remove_stats_lock();
 }
 
 void update_counter( char *key, double value, double sample_rate ) {
@@ -323,9 +326,9 @@ void update_counter( char *key, double value, double sample_rate ) {
 void update_timer( char *key, double value ) {
   syslog(LOG_DEBUG, "update_timer ( %s, %f )\n", key, value);
   statsd_timer_t *t;
-  wait_for_timers_lock();
+  syslog(LOG_DEBUG, "HASH_FIND_STR '%s'\n", key);
   HASH_FIND_STR( timers, key, t );
-  remove_timers_lock();
+  syslog(LOG_DEBUG, "after HASH_FIND_STR '%s'\n", key);
   if (t) {
     syslog(LOG_DEBUG, "Updating old timer entry");
     wait_for_timers_lock();
@@ -338,11 +341,8 @@ void update_timer( char *key, double value ) {
 
     strcpy(t->key, key);
     t->count = 0;
-
-    wait_for_timers_lock();
     t->values[t->count] = value;
     t->count++;
-    remove_timers_lock();
 
     wait_for_timers_lock();
     HASH_ADD_STR( timers, key, t );
