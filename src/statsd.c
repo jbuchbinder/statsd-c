@@ -9,8 +9,10 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -31,6 +33,8 @@
 #include "strings.h"
 #include "embeddedgmetric.h"
 
+#define LOCK_FILE "/tmp/statsd.lock"
+
 /*
  * GLOBAL VARIABLES
  */
@@ -48,7 +52,7 @@ pthread_t thread_mgmt;
 pthread_t thread_flush;
 int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT, flush_interval = FLUSH_INTERVAL;
 int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0, enable_gmetric = 0;
-char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL, *ganglia_metric_prefix = NULL;
+char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL, *ganglia_metric_prefix = NULL, *lock_file = NULL;
 
 /*
  * FUNCTION PROTOTYPES
@@ -72,6 +76,7 @@ void init_stats() {
 
   if (serialize_file && !clear_stats) {
     syslog(LOG_DEBUG, "Deserializing stats from file.");
+
     statsd_deserialize(serialize_file);
   }
 
@@ -114,6 +119,12 @@ void die_with_error(char *s) {
   exit(1);
 }
 
+void sighup_handler (int signum) {
+  syslog(LOG_ERR, "SIGHUP caught");
+  cleanup();
+  exit(1);
+}
+
 void sigint_handler (int signum) {
   syslog(LOG_ERR, "SIGINT caught");
   cleanup();
@@ -126,9 +137,64 @@ void sigquit_handler (int signum) {
   exit(1);
 }
 
+void sigterm_handler (int signum) {
+  syslog(LOG_ERR, "SIGTERM caught");
+  cleanup();
+  exit(1);
+}
+
+void daemonize_server() {
+  int pid;
+  int lockfp;
+  char str[10];
+
+  if (getppid() == 1) {
+    return;
+  }
+  pid = fork();
+  if (pid < 0) {
+    exit(1);
+  }
+  if (pid > 0) {
+    exit(0);
+  }
+
+  /* Try to become root, but ignore if we can't */
+  setuid((uid_t) 0);
+  errno = 0;
+
+  setsid();
+  for (pid = getdtablesize(); pid>=0; --pid) {
+    close(pid);
+  }
+  pid = open("/dev/null", O_RDWR); dup(pid); dup(pid);
+  umask((mode_t) 022);
+  lockfp = open(lock_file != NULL ? lock_file : LOCK_FILE, O_RDWR | O_CREAT, 0640);
+  if (lockfp < 0) {
+    syslog(LOG_ERR, "Could not serialize PID to lock file");
+    exit(1);
+  }
+  if (lockf(lockfp, F_TLOCK,0)<0) {
+    syslog(LOG_ERR, "Could not create lock, bailing out");
+    exit(0);
+  }
+  sprintf(str, "%d\n", getpid());
+  write(lockfp, str, strlen(str));
+  close(lockfp);
+
+  /* Signal handling */
+  signal(SIGCHLD, SIG_IGN        );
+  signal(SIGTSTP, SIG_IGN        );
+  signal(SIGTTOU, SIG_IGN        );
+  signal(SIGTTIN, SIG_IGN        );
+  signal(SIGHUP , sighup_handler );
+  signal(SIGTERM, sigterm_handler);
+}
+
 int main(int argc, char *argv[]) {
   int pids[4] = { 1, 2, 3 };
-  int opt;
+  int opt, rc;
+  pthread_attr_t attr;
 
   signal (SIGINT, sigint_handler);
   signal (SIGQUIT, sigquit_handler);
@@ -137,7 +203,7 @@ int main(int argc, char *argv[]) {
   sem_init(&timers_lock, 0, 1);
   sem_init(&counters_lock, 0, 1);
 
-  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:P:")) != -1) {
+  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:P:l:")) != -1) {
     switch (opt) {
       case 'd':
         printf("Debug enabled.\n");
@@ -188,8 +254,12 @@ int main(int argc, char *argv[]) {
         ganglia_metric_prefix = strdup(optarg);
         printf("Ganglia metric prefix %s\n", ganglia_metric_prefix);
         break;
+      case 'l':
+        lock_file = strdup(optarg);
+        printf("Lock file %s\n", lock_file);
+        break;
       case 'h':
-        fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile]\n", argv[0]);
         fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
         fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
         fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
@@ -197,6 +267,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
         fprintf(stderr, "\t-S spoofhost      ganglia spoof host (default statsd:statsd)\n");
         fprintf(stderr, "\t-P prefix         ganglia metric prefix (default is none)\n");
+        fprintf(stderr, "\t-l lockfile       lock file (only used when daemonizing)\n");
         fprintf(stderr, "\t-h                this help display\n");
         fprintf(stderr, "\t-d                enable debug\n");
         fprintf(stderr, "\t-D                daemonize\n");
@@ -215,7 +286,7 @@ int main(int argc, char *argv[]) {
 
   if (debug) {
     setlogmask(LOG_UPTO(LOG_DEBUG));
-    openlog("statsd-c", LOG_CONS | LOG_NDELAY | LOG_PERROR | LOG_PID, LOG_USER);
+    openlog("statsd-c",  LOG_CONS | LOG_NDELAY | LOG_PERROR | LOG_PID, LOG_USER);
   } else {
     setlogmask(LOG_UPTO(LOG_INFO));
     openlog("statsd-c", LOG_CONS, LOG_USER);
@@ -224,13 +295,34 @@ int main(int argc, char *argv[]) {
   /* Initialization of certain stats, here. */
   init_stats();
 
-  pthread_create (&thread_udp,   NULL, (void *) &p_thread_udp,   (void *) &pids[0]);
-  pthread_create (&thread_mgmt,  NULL, (void *) &p_thread_mgmt,  (void *) &pids[1]);
-  pthread_create (&thread_flush, NULL, (void *) &p_thread_flush, (void *) &pids[2]);
+  if (daemonize) {
+    syslog(LOG_DEBUG, "Daemonizing statsd-c");
+    daemonize_server();
 
-  pthread_join(thread_udp,   NULL);
-  pthread_join(thread_mgmt,  NULL);
-  pthread_join(thread_flush, NULL);
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN + 1024 * 1024);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  }
+
+  pthread_create (&thread_udp,   daemonize ? &attr : NULL, (void *) &p_thread_udp,   (void *) &pids[0]);
+  pthread_create (&thread_mgmt,  daemonize ? &attr : NULL, (void *) &p_thread_mgmt,  (void *) &pids[1]);
+  pthread_create (&thread_flush, daemonize ? &attr : NULL, (void *) &p_thread_flush, (void *) &pids[2]);
+
+  if (daemonize) {
+    syslog(LOG_DEBUG, "Destroying pthread attributes");
+    pthread_attr_destroy(&attr);
+    syslog(LOG_DEBUG, "Detaching pthreads");
+    rc = pthread_detach(thread_udp);
+    rc = pthread_detach(thread_mgmt);
+    rc = pthread_detach(thread_flush);
+    for (;;) { }
+  } else {
+    syslog(LOG_DEBUG, "Waiting for pthread termination");
+    pthread_join(thread_udp,   NULL);
+    pthread_join(thread_mgmt,  NULL);
+    pthread_join(thread_flush, NULL);
+    syslog(LOG_DEBUG, "Pthreads terminated");
+  }
 
   return 0;
 }
@@ -357,25 +449,23 @@ void dump_stats() {
       statsd_stat_t *s, *tmp;
       wait_for_stats_lock();
       HASH_ITER(hh, stats, s, tmp) {
-        printf("\t%s.%s: %ld\n", s->name.group_name, s->name.key_name, s->value);
+        syslog(LOG_DEBUG, "%s.%s: %ld", s->name.group_name, s->name.key_name, s->value);
       }
       remove_stats_lock();
       if (s) free(s);
       if (tmp) free(tmp);
-      printf("==============================\n\n");
     }
 
     {
-      printf("\n\nCounters dump\n==============================\n");
+      syslog(LOG_DEBUG, "Counters dump:");
       statsd_counter_t *c, *tmp;
       wait_for_counters_lock();
       HASH_ITER(hh, counters, c, tmp) {
-        printf("\t%s: %Lf\n", c->key, c->value);
+        syslog(LOG_DEBUG, "%s: %Lf", c->key, c->value);
       }
       remove_counters_lock();
       if (c) free(c);
       if (tmp) free(tmp);
-      printf("==============================\n\n");
     }
   }
 }
@@ -878,8 +968,8 @@ void p_thread_flush(void *ptr) {
       HASH_ITER(hh, timers, s_timer, tmp) {
         if (s_timer->count > 0) {
           int pctThreshold = 90; /* TODO FIXME: dynamic assignment */
-          double min;
-          double max;
+          double min = -1;
+          double max = -1;
           {
             int i;
             for(i = 0; i < s_timer->count; i++) {

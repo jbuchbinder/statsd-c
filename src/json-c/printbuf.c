@@ -99,7 +99,7 @@ static int vasprintf(char **buf, const char *fmt, va_list ap)
 int sprintbuf(struct printbuf *p, const char *msg, ...)
 {
   va_list ap;
-  char *t;
+  char *t = NULL;
   int size;
   char buf[128];
 
