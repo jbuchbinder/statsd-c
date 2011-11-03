@@ -452,7 +452,7 @@ void update_timer( char *key, double value ) {
 void dump_stats() {
   if (debug) {
     {
-      printf("\n\nStats dump\n==============================\n");
+      syslog(LOG_DEBUG, "Stats dump:");
       statsd_stat_t *s, *tmp;
       wait_for_stats_lock();
       HASH_ITER(hh, stats, s, tmp) {
