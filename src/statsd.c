@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include "json-c/json.h"
+#include "uthash/utarray.h"
 #include "statsd.h"
 #include "serialize.h"
 #include "stats.h"
@@ -45,6 +46,7 @@ statsd_counter_t *counters = NULL;
 sem_t counters_lock;
 statsd_timer_t *timers = NULL;
 sem_t timers_lock;
+UT_icd timers_icd = { sizeof(double), NULL, NULL, NULL };
 
 int stats_udp_socket, stats_mgmt_socket;
 pthread_t thread_udp;
@@ -111,6 +113,9 @@ void cleanup() {
   sem_destroy(&stats_lock);
   sem_destroy(&timers_lock);
   sem_destroy(&counters_lock);
+
+  syslog(LOG_INFO, "Removing lockfile %s", lock_file != NULL ? lock_file : LOCK_FILE);
+  unlink(lock_file != NULL ? lock_file : LOCK_FILE);
 }
 
 void die_with_error(char *s) {
@@ -334,7 +339,7 @@ void add_timer( char *key, double value ) {
     /* Add to old entry */
     wait_for_timers_lock();
     t->count++;
-    t->values[t->count - 1] = value;
+    utarray_push_back(t->values, &value);
     remove_timers_lock();
   } else {
     /* Create new entry */
@@ -342,7 +347,8 @@ void add_timer( char *key, double value ) {
 
     strcpy(t->key, key);
     t->count = 1;
-    t->values[t->count - 1] = value;
+    utarray_new(t->values, &timers_icd);
+    utarray_push_back(t->values, &value);
 
     wait_for_timers_lock();
     HASH_ADD_STR( timers, key, t );
@@ -424,7 +430,7 @@ void update_timer( char *key, double value ) {
   if (t) {
     syslog(LOG_DEBUG, "Updating old timer entry");
     wait_for_timers_lock();
-    t->values[t->count] = value;
+    utarray_push_back(t->values, &value);
     t->count++;
     remove_timers_lock();
   } else {
@@ -433,7 +439,8 @@ void update_timer( char *key, double value ) {
 
     strcpy(t->key, key);
     t->count = 0;
-    t->values[t->count] = value;
+    utarray_new(t->values, &timers_icd);
+    utarray_push_back(t->values, &value);
     t->count++;
 
     wait_for_timers_lock();
@@ -832,11 +839,11 @@ void p_thread_mgmt(void *ptr) {
                 STREAM_SEND(i, ": ")
                 STREAM_SEND_INT(i, s_timer->count)
                 if (s_timer->count > 0) {
-                  int j;
+                  double *j = NULL; bool first = 1;
 		  STREAM_SEND(i, " [")
-                  for (j=0; j<s_timer->count; j++) {
-                    if (j != 0) { STREAM_SEND(i, ",") }
-                    STREAM_SEND_DOUBLE(i, s_timer->values[j])
+                  while( (j=(double *)utarray_next(s_timer->values, j)) ) {
+                    if (first == 1) { first = 0; STREAM_SEND(i, ",") }
+                    STREAM_SEND_DOUBLE(i, *j)
                   }
 		  STREAM_SEND(i, "]")
                 }
@@ -971,16 +978,17 @@ void p_thread_flush(void *ptr) {
           double min = -1;
           double max = -1;
           {
-            int i;
-            for(i = 0; i < s_timer->count; i++) {
-              if (i == 0) {
-                min = s_timer->values[i];
-                max = s_timer->values[i];
+            double *i; int count = 0;
+            while( (i=(double *) utarray_next( s_timer->values, i)) ) {
+              if (count == 0) {
+                min = *i;
+                max = *i;
               } else {
-                if (s_timer->values[i] < min) min = s_timer->values[i];
-                if (s_timer->values[i] > max) max = s_timer->values[i];
+                if (*i < min) min = *i;
+                if (*i > max) max = *i;
               }
-            } 
+            }
+            count++;
           }
 
           double mean = min;
@@ -989,12 +997,12 @@ void p_thread_flush(void *ptr) {
           if (s_timer->count > 1) {
             double thresholdIndex = ((100 - pctThreshold) / 100) * s_timer->count;
             int numInThreshold = s_timer->count - thresholdIndex;
-            maxAtThreshold = s_timer->values[numInThreshold - 1];
+            maxAtThreshold = * ( utarray_eltptr( s_timer->values, numInThreshold - 1 ) );
 
             double sum = 0;
             int i;
             for (i = 0; i < numInThreshold; i++) {
-              sum += s_timer->values[i];
+              sum += 1 /* s_timer->values[i] */;
             }
             mean = sum / numInThreshold;
           }

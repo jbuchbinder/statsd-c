@@ -11,10 +11,13 @@
 #include <syslog.h>
 
 #include "json-c/json.h"
+#include "uthash/utarray.h"
 
 #include "counters.h"
 #include "stats.h"
 #include "timers.h"
+
+extern UT_icd timers_icd;
 
 int statsd_deserialize( char *filename ) {
   FILE *fp;
@@ -80,9 +83,11 @@ int statsd_deserialize( char *filename ) {
 
       strcpy(t->key, key);
       t->count = json_object_array_length(val);
+      utarray_new(t->values, &timers_icd);
       int i;
       for (i = 0; i < t->count; i++) {
-        t->values[i] = json_object_get_double(json_object_array_get_idx(val, i));
+        double d = json_object_get_double(json_object_array_get_idx(val, i));
+        utarray_push_back(t->values, &d);
       }
 
       wait_for_timers_lock();
@@ -135,10 +140,10 @@ int statsd_serialize( char *filename ) {
     statsd_timer_t *s, *tmp;
     wait_for_timers_lock();
     HASH_ITER(hh, timers, s, tmp) {
-      int iter;
+      double *iter = NULL;
       json_object *array = json_object_new_array();
-      for (iter=0; iter < s->count; iter++) {
-        json_object_array_add(array, json_object_new_double(s->values[iter]));
+      while ( (iter = (double *) utarray_next(s->values, iter))) {
+        json_object_array_add(array, json_object_new_double(*iter));
       }
       json_object_object_add(obj_timers, s->key, array);
     }
