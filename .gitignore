@@ -1,4 +1,5 @@
 statsd
+statsd_client
 src/*.o
 src/json-c/*.o
 src/embeddedgmetric/*.o
