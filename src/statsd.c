@@ -148,6 +148,13 @@ void sigterm_handler (int signum) {
   exit(1);
 }
 
+int double_sort (const void *a, const void *b) {
+  double _a = *(double *)a;
+  double _b = *(double *)b;
+  if (_a == _b) return 0;
+  return (_a < _b) ? -1 : 1;
+}
+
 void daemonize_server() {
   int pid;
   int lockfp;
@@ -975,10 +982,14 @@ void p_thread_flush(void *ptr) {
       HASH_ITER(hh, timers, s_timer, tmp) {
         if (s_timer->count > 0) {
           int pctThreshold = 90; /* TODO FIXME: dynamic assignment */
+
+          /* Sort all values in this timer list */
+          utarray_sort(s_timer->values, double_sort);
+
           double min = -1;
           double max = -1;
           {
-            double *i; int count = 0;
+            double *i = NULL; int count = 0;
             while( (i=(double *) utarray_next( s_timer->values, i)) ) {
               if (count == 0) {
                 min = *i;
@@ -1000,9 +1011,10 @@ void p_thread_flush(void *ptr) {
             maxAtThreshold = * ( utarray_eltptr( s_timer->values, numInThreshold - 1 ) );
 
             double sum = 0;
-            int i;
-            for (i = 0; i < numInThreshold; i++) {
-              sum += 1 /* s_timer->values[i] */;
+            double *i = NULL; int count = 0;
+            while( (i=(double *) utarray_next( s_timer->values, i)) && count < numInThreshold ) {
+              sum += *i;
+              count++;
             }
             mean = sum / numInThreshold;
           }
@@ -1021,6 +1033,11 @@ void p_thread_flush(void *ptr) {
             s_timer->key, s_timer->count, ts
           );
 #endif
+
+          /* Clear all values for this timer */
+          utarray_clear(s_timer->values);
+          s_timer->count = 0;
+
           if (enable_gmetric) {
             {
               char *k = malloc(strlen(s_timer->key) + 18);
