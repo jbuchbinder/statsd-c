@@ -77,7 +77,8 @@ int main(int argc, char *argv[]) {
   /* Send message */
   int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   ip = resolve_host(host);
-  memset(&sa, 0, sizeof(struct sockaddr_in *));
+  sa = malloc(sizeof(struct sockaddr_in *));
+/*  memset(&sa, 0, sizeof(struct sockaddr_in)); */
   sa->sin_family = AF_INET;
   sa->sin_port = htons(port);
   memcpy(&sa->sin_addr, &ip, sizeof(ip));
