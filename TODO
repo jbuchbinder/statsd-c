@@ -10,4 +10,5 @@ TODO
 * Implement stats serialize/deserialize using JSON for persistence. [DONE]
 * Implement command line option handling. [DONE]
 * Extend statsd by allowing auto detection of JSON format. [DONE]
+* Implement client "performance testing" mode.
 
