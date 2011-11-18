@@ -8,6 +8,7 @@
 BINARY= statsd
 OBJECTS= \
 	src/statsd.o \
+	src/queue.o \
 	src/serialize.o \
 	src/strings.o \
 	src/embeddedgmetric/embeddedgmetric.o \

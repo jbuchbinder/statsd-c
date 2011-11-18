@@ -26,6 +26,7 @@
 
 #include "json-c/json.h"
 #include "uthash/utarray.h"
+#include "queue.h"
 #include "statsd.h"
 #include "serialize.h"
 #include "stats.h"
@@ -52,6 +53,7 @@ int stats_udp_socket, stats_mgmt_socket;
 pthread_t thread_udp;
 pthread_t thread_mgmt;
 pthread_t thread_flush;
+pthread_t thread_queue;
 int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT, flush_interval = FLUSH_INTERVAL;
 int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0, enable_gmetric = 0;
 char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL, *ganglia_metric_prefix = NULL, *lock_file = NULL;
@@ -71,6 +73,7 @@ void dump_stats();
 void p_thread_udp(void *ptr);
 void p_thread_mgmt(void *ptr);
 void p_thread_flush(void *ptr);
+void p_thread_queue(void *ptr);
 
 void init_stats() {
   char *startup_time = malloc(sizeof(char *));
@@ -95,6 +98,7 @@ void cleanup() {
   pthread_cancel(thread_flush);
   pthread_cancel(thread_udp);
   pthread_cancel(thread_mgmt);
+  pthread_cancel(thread_queue);
 
   if (stats_udp_socket) {
     syslog(LOG_INFO, "Closing UDP stats socket.");
@@ -204,7 +208,7 @@ void daemonize_server() {
 }
 
 int main(int argc, char *argv[]) {
-  int pids[4] = { 1, 2, 3 };
+  int pids[4] = { 1, 2, 3, 4 };
   int opt, rc;
   pthread_attr_t attr;
 
@@ -214,6 +218,8 @@ int main(int argc, char *argv[]) {
   sem_init(&stats_lock, 0, 1);
   sem_init(&timers_lock, 0, 1);
   sem_init(&counters_lock, 0, 1);
+
+  queue_init();
 
   while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:P:l:")) != -1) {
     switch (opt) {
@@ -319,6 +325,7 @@ int main(int argc, char *argv[]) {
   pthread_create (&thread_udp,   daemonize ? &attr : NULL, (void *) &p_thread_udp,   (void *) &pids[0]);
   pthread_create (&thread_mgmt,  daemonize ? &attr : NULL, (void *) &p_thread_mgmt,  (void *) &pids[1]);
   pthread_create (&thread_flush, daemonize ? &attr : NULL, (void *) &p_thread_flush, (void *) &pids[2]);
+  pthread_create (&thread_queue, daemonize ? &attr : NULL, (void *) &p_thread_queue, (void *) &pids[3]);
 
   if (daemonize) {
     syslog(LOG_DEBUG, "Destroying pthread attributes");
@@ -327,12 +334,14 @@ int main(int argc, char *argv[]) {
     rc = pthread_detach(thread_udp);
     rc = pthread_detach(thread_mgmt);
     rc = pthread_detach(thread_flush);
+    rc = pthread_detach(thread_queue);
     for (;;) { }
   } else {
     syslog(LOG_DEBUG, "Waiting for pthread termination");
     pthread_join(thread_udp,   NULL);
     pthread_join(thread_mgmt,  NULL);
     pthread_join(thread_flush, NULL);
+    pthread_join(thread_queue, NULL);
     syslog(LOG_DEBUG, "Pthreads terminated");
   }
 
@@ -633,8 +642,8 @@ void process_stats_packet(char buf_in[]) {
           sample_rate = strtod( (char *) *(s_sample_rate + 1), (char **) NULL );
         }
         update_counter(key_name, value, sample_rate);
-        syslog(LOG_DEBUG, "UDP: Found key name '%s'\n", key_name);
-        syslog(LOG_DEBUG, "UDP: Found value '%f'\n", value);
+        syslog(LOG_DEBUG, "Found key name '%s'\n", key_name);
+        syslog(LOG_DEBUG, "Found value '%f'\n", value);
       }
       if (s_sample_rate) free(s_sample_rate);
       if (s_number) free(s_number);
@@ -686,7 +695,7 @@ void p_thread_udp(void *ptr) {
     syslog(LOG_DEBUG, "UDP: Binding to socket.");
     if (bind(stats_udp_socket, (struct sockaddr *)&si_me, sizeof(si_me))==-1)
         die_with_error("UDP: Could not bind");
-    syslog(LOG_DEBUG, "UDP: Bound to socket.");
+    syslog(LOG_DEBUG, "UDP: Bound to socket on port %d", port);
 
     while (1) {
       waitd.tv_sec = 1;
@@ -695,9 +704,12 @@ void p_thread_udp(void *ptr) {
       FD_ZERO(&write_flags);
       FD_SET(stats_udp_socket, &read_flags);
 
+      syslog(LOG_DEBUG, "select");
       stat = select(stats_udp_socket+1, &read_flags, &write_flags, (fd_set*)0, &waitd);
+      syslog(LOG_DEBUG, "after select");
       /* If we can't do anything for some reason, wait a bit */
       if (stat < 0) {
+        syslog(LOG_INFO, "Can't do anything, stat == %d", stat);
         sleep(1);
         continue;
       }
@@ -714,13 +726,11 @@ void p_thread_udp(void *ptr) {
         syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n", 
             inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf_in);
 
-        if (buf_in[0] == '{' || buf_in[0] == '[') {
-          syslog(LOG_DEBUG, "UDP: Processing as JSON packet");
-          process_json_stats_packet(buf_in);
-        } else {
-          syslog(LOG_DEBUG, "UDP: Processing as standard packet");
-          process_stats_packet(buf_in);
-        }
+        char *packet = malloc(sizeof(buf_in));
+        packet = strdup(buf_in);
+        syslog(LOG_DEBUG, "UDP: Storing packet in queue");
+        queue_store( packet );
+        syslog(LOG_DEBUG, "UDP: Stored packet in queue");
       }
     }
 
@@ -728,6 +738,31 @@ void p_thread_udp(void *ptr) {
 
     /* end udp listener */
   syslog(LOG_INFO, "Thread[Udp]: Ending thread %d\n", (int) *((int *) ptr));
+  pthread_exit(0);
+}
+
+void p_thread_queue(void *ptr) {
+  syslog(LOG_INFO, "Thread[Queue]: Starting thread %d\n", (int) *((int *) ptr));
+
+  while (1) {
+    char *packet = queue_pop_first();
+    while (packet != NULL) {
+      char buf_in[BUFLEN];
+      memset(&buf_in, 0, sizeof(buf_in));
+      strcpy(buf_in, packet);
+      
+      if (buf_in[0] == '{' || buf_in[0] == '[') {
+        syslog(LOG_DEBUG, "Queue: Processing as JSON packet");
+        process_json_stats_packet(buf_in);
+      } else {
+        syslog(LOG_DEBUG, "Queue: Processing as standard packet");
+        process_stats_packet(buf_in);
+      }
+      packet = queue_pop_first();
+    }
+  }
+
+  syslog(LOG_INFO, "Thread[Queue]: Ending thread %d\n", (int) *((int *) ptr));
   pthread_exit(0);
 }
 
