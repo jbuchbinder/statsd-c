@@ -402,14 +402,17 @@ void update_stat( char *group, char *key, char *value ) {
 void update_counter( char *key, double value, double sample_rate ) {
   syslog(LOG_DEBUG, "update_counter ( %s, %f, %f )\n", key, value, sample_rate);
   statsd_counter_t *c;
-  wait_for_counters_lock();
   HASH_FIND_STR( counters, key, c );
   if (c) {
     syslog(LOG_DEBUG, "Updating old counter entry");
     if (sample_rate == 0) {
+      wait_for_counters_lock();
       c->value = c->value + value;
+      remove_counters_lock();
     } else {
+      wait_for_counters_lock();
       c->value = c->value + ( value * ( 1 / sample_rate ) );
+      remove_counters_lock();
     }
   } else {
     syslog(LOG_DEBUG, "Adding new counter entry");
@@ -423,9 +426,10 @@ void update_counter( char *key, double value, double sample_rate ) {
       c->value = value * ( 1 / sample_rate );
     }
 
+    wait_for_counters_lock();
     HASH_ADD_STR( counters, key, c );
+    remove_counters_lock();
   }
-  remove_counters_lock();
 }
 
 void update_timer( char *key, double value ) {
@@ -461,11 +465,9 @@ void dump_stats() {
     {
       syslog(LOG_DEBUG, "Stats dump:");
       statsd_stat_t *s, *tmp;
-      wait_for_stats_lock();
       HASH_ITER(hh, stats, s, tmp) {
         syslog(LOG_DEBUG, "%s.%s: %ld", s->name.group_name, s->name.key_name, s->value);
       }
-      remove_stats_lock();
       if (s) free(s);
       if (tmp) free(tmp);
     }
@@ -473,11 +475,9 @@ void dump_stats() {
     {
       syslog(LOG_DEBUG, "Counters dump:");
       statsd_counter_t *c, *tmp;
-      wait_for_counters_lock();
       HASH_ITER(hh, counters, c, tmp) {
         syslog(LOG_DEBUG, "%s: %Lf", c->key, c->value);
       }
-      remove_counters_lock();
       if (c) free(c);
       if (tmp) free(tmp);
     }
@@ -823,14 +823,12 @@ void p_thread_mgmt(void *ptr) {
               /* send counters */
 
               statsd_counter_t *s_counter, *tmp;
-              wait_for_counters_lock();
               HASH_ITER(hh, counters, s_counter, tmp) {
                 STREAM_SEND(i, s_counter->key)
                 STREAM_SEND(i, ": ")
                 STREAM_SEND_LONG_DOUBLE(i, s_counter->value)
                 STREAM_SEND(i, "\n")
               }
-              remove_counters_lock();
               if (s_counter) free(s_counter);
               if (tmp) free(tmp);
 
@@ -840,7 +838,6 @@ void p_thread_mgmt(void *ptr) {
               /* send timers */
 
               statsd_timer_t *s_timer, *tmp;
-              wait_for_timers_lock();
               HASH_ITER(hh, timers, s_timer, tmp) {
                 STREAM_SEND(i, s_timer->key)
                 STREAM_SEND(i, ": ")
@@ -856,7 +853,6 @@ void p_thread_mgmt(void *ptr) {
                 }
                 STREAM_SEND(i, "\n")
               }
-              remove_timers_lock();
               if (s_timer) free(s_timer);
               if (tmp) free(tmp);
 
@@ -866,7 +862,6 @@ void p_thread_mgmt(void *ptr) {
               /* send stats */
 
               statsd_stat_t *s_stat, *tmp;
-              wait_for_stats_lock();
               HASH_ITER(hh, stats, s_stat, tmp) {
                 if (strlen(s_stat->name.group_name) > 1) {
                   STREAM_SEND(i, s_stat->name.group_name)
@@ -877,7 +872,6 @@ void p_thread_mgmt(void *ptr) {
                 STREAM_SEND_LONG(i, s_stat->value)
                 STREAM_SEND(i, "\n")
               }
-              remove_stats_lock();
               if (s_stat) free(s_stat);
               if (tmp) free(tmp);
 
@@ -897,7 +891,7 @@ void p_thread_mgmt(void *ptr) {
     }
   }
 
-    /* end mgmt listener */
+  /* end mgmt listener */
 
   syslog(LOG_INFO, "Thread[Mgmt]: Ending thread %d\n", (int) *((int *) ptr));
   pthread_exit(0);
@@ -930,7 +924,6 @@ void p_thread_flush(void *ptr) {
 
     {
       statsd_counter_t *s_counter, *tmp;
-      wait_for_counters_lock();
       HASH_ITER(hh, counters, s_counter, tmp) {
         long double value = s_counter->value / flush_interval;
 #ifdef SEND_GRAPHITE
@@ -967,24 +960,26 @@ void p_thread_flush(void *ptr) {
 #endif
 
         /* Clear counter after we're done with it */
+        wait_for_counters_lock();
         s_counter->value = 0;
+        remove_counters_lock();
 
         numStats++;
       }
-      remove_counters_lock();
       if (s_counter) free(s_counter);
       if (tmp) free(tmp);
     }
 
     {
       statsd_timer_t *s_timer, *tmp;
-      wait_for_timers_lock();
       HASH_ITER(hh, timers, s_timer, tmp) {
         if (s_timer->count > 0) {
           int pctThreshold = 90; /* TODO FIXME: dynamic assignment */
 
           /* Sort all values in this timer list */
+          wait_for_timers_lock();
           utarray_sort(s_timer->values, double_sort);
+          remove_timers_lock();
 
           double min = -1;
           double max = -1;
@@ -1035,8 +1030,10 @@ void p_thread_flush(void *ptr) {
 #endif
 
           /* Clear all values for this timer */
+          wait_for_timers_lock();
           utarray_clear(s_timer->values);
           s_timer->count = 0;
+          remove_timers_lock();
 
           if (enable_gmetric) {
             {
@@ -1081,7 +1078,6 @@ void p_thread_flush(void *ptr) {
         }
         numStats++;
       }
-      remove_timers_lock();
       if (s_timer) free(s_timer);
       if (tmp) free(tmp);
     }
