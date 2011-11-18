@@ -16,43 +16,40 @@
 int queue_store_pos = 0;
 int queue_retrieve_pos = 0;
 char *queue[MAX_QUEUE_SIZE];
-pthread_mutex_t queue_mutex;
+//pthread_mutex_t queue_mutex;
 
 void queue_init( ) {
   syslog(LOG_DEBUG, "queue_init");
   queue_store_pos = 0;
   queue_retrieve_pos = 0;
-  pthread_mutex_init(&queue_mutex, NULL);
+  //pthread_mutex_init(&queue_mutex, NULL);
+  int p;
+  for (p = 0; p < MAX_QUEUE_SIZE; p++ ) queue[ p ] = NULL;
 }
 
 int queue_store( char *ptr ) {
   syslog(LOG_DEBUG, "queue_store ('%s')", ptr);
   if (queue_store_pos == MAX_QUEUE_SIZE) {
-    syslog(LOG_ERR, "Queue has reached maximum size of %d", MAX_QUEUE_SIZE);
-    return 0;
+    syslog(LOG_INFO, "Queue has reached maximum size of %d, wrapping", MAX_QUEUE_SIZE);
+    queue_store_pos = 0;
   }
-  pthread_mutex_lock(&queue_mutex);
+  //pthread_mutex_lock(&queue_mutex);
   queue[ queue_store_pos ] = ptr;
   queue_store_pos ++;
-  pthread_mutex_unlock(&queue_mutex);
+  //pthread_mutex_unlock(&queue_mutex);
   return 1;
 }
 
 char *queue_pop_first( ) {
-  if (queue_store_pos <= queue_retrieve_pos) return NULL;
-  pthread_mutex_lock(&queue_mutex);
-  /* Pull item off beginning of queue */
-  char *tmpptr = queue[ 0 ];
-  /* Slide everything backwards */
-  int p;
-  for (p = 1; p < queue_store_pos - 1; p++) {
-    if (queue[p] != NULL) queue[p - 1] = queue[p];
+  if (queue[ queue_retrieve_pos ] == NULL) return NULL;
+  //pthread_mutex_lock(&queue_mutex);
+  char *tmpptr = queue[ queue_retrieve_pos ];
+  queue[ queue_retrieve_pos ] = NULL;
+  queue_retrieve_pos ++;
+  if (queue_retrieve_pos == MAX_QUEUE_SIZE) {
+    queue_retrieve_pos = 0;
   }
-  /* Last item would be a dupe, remove for good measure */
-  queue[queue_store_pos - 1] = NULL;
-  /* Push store "pointer" back one position */
-  queue_store_pos --;
-  pthread_mutex_unlock(&queue_mutex);
+  //pthread_mutex_unlock(&queue_mutex);
   return tmpptr;
 }
 

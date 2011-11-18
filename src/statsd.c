@@ -704,9 +704,7 @@ void p_thread_udp(void *ptr) {
       FD_ZERO(&write_flags);
       FD_SET(stats_udp_socket, &read_flags);
 
-      syslog(LOG_DEBUG, "select");
       stat = select(stats_udp_socket+1, &read_flags, &write_flags, (fd_set*)0, &waitd);
-      syslog(LOG_DEBUG, "after select");
       /* If we can't do anything for some reason, wait a bit */
       if (stat < 0) {
         syslog(LOG_INFO, "Can't do anything, stat == %d", stat);
