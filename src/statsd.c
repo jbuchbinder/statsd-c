@@ -207,9 +207,31 @@ void daemonize_server() {
   signal(SIGTERM, sigterm_handler);
 }
 
+#define CHECK_PTHREAD_DETACH() if (rc == EINVAL) syslog(LOG_ERR, "pthread_detach returned EINVAL"); if (rc == ESRCH) syslog(LOG_ERR, "pthread_detach returned ESRCH")
+
+void syntax(char *argv[]) {
+  fprintf(stderr, "statsd-c version %s\nhttps://github.com/jbuchbinder/statsd-c\n\n", STATSD_VERSION);
+  fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile]\n", argv[0]);
+  fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
+  fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
+  fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
+  fprintf(stderr, "\t-G host           ganglia host (default disabled)\n");
+  fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
+  fprintf(stderr, "\t-S spoofhost      ganglia spoof host (default statsd:statsd)\n");
+  fprintf(stderr, "\t-P prefix         ganglia metric prefix (default is none)\n");
+  fprintf(stderr, "\t-l lockfile       lock file (only used when daemonizing)\n");
+  fprintf(stderr, "\t-h                this help display\n");
+  fprintf(stderr, "\t-d                enable debug\n");
+  fprintf(stderr, "\t-D                daemonize\n");
+  fprintf(stderr, "\t-f                enable friendly mode (breaks wire compatibility)\n");
+  fprintf(stderr, "\t-F seconds        set flush interval in seconds (default 10)\n");
+  fprintf(stderr, "\t-c                clear stats on startup\n");
+  exit(1);
+}
+
 int main(int argc, char *argv[]) {
   int pids[4] = { 1, 2, 3, 4 };
-  int opt, rc;
+  int opt, rc = 0;
   pthread_attr_t attr;
 
   signal (SIGINT, sigint_handler);
@@ -277,23 +299,8 @@ int main(int argc, char *argv[]) {
         printf("Lock file %s\n", lock_file);
         break;
       case 'h':
-        fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile]\n", argv[0]);
-        fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
-        fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
-        fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
-        fprintf(stderr, "\t-G host           ganglia host (default disabled)\n");
-        fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
-        fprintf(stderr, "\t-S spoofhost      ganglia spoof host (default statsd:statsd)\n");
-        fprintf(stderr, "\t-P prefix         ganglia metric prefix (default is none)\n");
-        fprintf(stderr, "\t-l lockfile       lock file (only used when daemonizing)\n");
-        fprintf(stderr, "\t-h                this help display\n");
-        fprintf(stderr, "\t-d                enable debug\n");
-        fprintf(stderr, "\t-D                daemonize\n");
-        fprintf(stderr, "\t-f                enable friendly mode (breaks wire compatibility)\n");
-        fprintf(stderr, "\t-F seconds        set flush interval in seconds (default 10)\n");
-        fprintf(stderr, "\t-c                clear stats on startup\n");
-        exit(1);
       default:
+        syntax(argv);
         break;
     }
   }
@@ -332,9 +339,13 @@ int main(int argc, char *argv[]) {
     pthread_attr_destroy(&attr);
     syslog(LOG_DEBUG, "Detaching pthreads");
     rc = pthread_detach(thread_udp);
+    CHECK_PTHREAD_DETACH();
     rc = pthread_detach(thread_mgmt);
+    CHECK_PTHREAD_DETACH();
     rc = pthread_detach(thread_flush);
+    CHECK_PTHREAD_DETACH();
     rc = pthread_detach(thread_queue);
+    CHECK_PTHREAD_DETACH();
     for (;;) { }
   } else {
     syslog(LOG_DEBUG, "Waiting for pthread termination");

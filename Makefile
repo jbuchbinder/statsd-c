@@ -5,6 +5,7 @@
 #	http://github.com/jbuchbinder/statsd-c
 #
 
+VERSION=`cat VERSION`
 BINARY= statsd
 OBJECTS= \
 	src/statsd.o \
@@ -35,13 +36,15 @@ ALL_COMPILED_OBJECTS= \
 CC= gcc
 CFLAGS= -fPIC -Wall -pthread -lpthread \
 	-Isrc/json-c -Isrc/embeddedgmetric \
-	-Wno-format-security -Wno-int-to-pointer-cast
+	-Wno-format-security -Wno-int-to-pointer-cast \
+	-DSTATSD_VERSION=\"$(VERSION)\"
 
 # ANSI formatting
 BOLD=\033[1m
 UNBOLD=\033[0m
 
 all: compile
+	@echo "Built version $(VERSION)"
 
 compile: clean $(BINARY) $(CLIENT_BINARY)
 
