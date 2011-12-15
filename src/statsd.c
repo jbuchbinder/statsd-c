@@ -966,6 +966,10 @@ void p_thread_flush(void *ptr) {
     char *statString = NULL;
 #endif
 
+
+    /* ---------------------------------------------------------------------
+      Process counter metrics
+      -------------------------------------------------------------------- */
     {
       statsd_counter_t *s_counter, *tmp;
       HASH_ITER(hh, counters, s_counter, tmp) {
@@ -984,13 +988,13 @@ void p_thread_flush(void *ptr) {
               k = malloc(strlen(s_counter->key));
               k = strdup(s_counter->key);
             }
-            SEND_GMETRIC_DOUBLE(k, value, "no units");
+            SEND_GMETRIC_DOUBLE(k, k, value, "count");
             if (k) free(k);
           }
           {
             char *k = malloc(strlen(s_counter->key) + 13);
-            sprintf(k, "stats_counts_%s", s_counter->key);
-            SEND_GMETRIC_DOUBLE(k, s_counter->value, "no units");
+            // sprintf(k, "%s", s_counter->key);
+            SEND_GMETRIC_DOUBLE(s_counter->key, s_counter->key, s_counter->value, "count");
             if (k) free(k);
           }
         }
@@ -1013,6 +1017,10 @@ void p_thread_flush(void *ptr) {
       if (s_counter) free(s_counter);
       if (tmp) free(tmp);
     }
+
+    /* ---------------------------------------------------------------------
+      Process timer metrics
+      -------------------------------------------------------------------- */
 
     {
       statsd_timer_t *s_timer, *tmp;
@@ -1081,33 +1089,37 @@ void p_thread_flush(void *ptr) {
 
           if (enable_gmetric) {
             {
-              char *k = malloc(strlen(s_timer->key) + 18);
-              sprintf(k, "stats_timers_%s_mean", s_timer->key);
-              SEND_GMETRIC_DOUBLE(k, mean, "no units");
+	      
+	      // Mean value. Convert to seconds
+              char *k = malloc(strlen(s_timer->key) + 5);
+              sprintf(k, "%s_mean", s_timer->key);
+              SEND_GMETRIC_DOUBLE(s_timer->key, k, mean/1000, "sec");
               if (k) free(k);
             }
             {
-              char *k = malloc(strlen(s_timer->key) + 19);
-              sprintf(k, "stats_timers_%s_upper", s_timer->key);
-              SEND_GMETRIC_DOUBLE(k, max, "no units");
+	      // Max value. Convert to seconds
+              char *k = malloc(strlen(s_timer->key) + 6);
+              sprintf(k, "%s_upper", s_timer->key);
+              SEND_GMETRIC_DOUBLE(s_timer->key, k, max/1000, "sec");
               if (k) free(k);
             }
             {
-              char *k = malloc(strlen(s_timer->key) + 30);
-              sprintf(k, "stats_timers_%s_upper_%d", s_timer->key, pctThreshold);
-              SEND_GMETRIC_DOUBLE(k, maxAtThreshold, "no units");
+	      // Percentile value. Convert to seconds
+              char *k = malloc(strlen(s_timer->key) + 10);
+              sprintf(k, "%s_%dth_pct", s_timer->key, pctThreshold);
+              SEND_GMETRIC_DOUBLE(s_timer->key, k, maxAtThreshold/1000, "sec");
               if (k) free(k);
             }
             {
-              char *k = malloc(strlen(s_timer->key) + 19);
-              sprintf(k, "stats_timers_%s_lower", s_timer->key);
-              SEND_GMETRIC_DOUBLE(k, min, "no units");
+              char *k = malloc(strlen(s_timer->key) + 6);
+              sprintf(k, "%s_lower", s_timer->key);
+              SEND_GMETRIC_DOUBLE(s_timer->key, k, min/1000, "sec");
               if (k) free(k);
             }
             {
-              char *k = malloc(strlen(s_timer->key) + 19);
-              sprintf(k, "stats_timers_%s_count", s_timer->key);
-              SEND_GMETRIC_INT(k, s_timer->count, "no units");
+              char *k = malloc(strlen(s_timer->key) + 6);
+              sprintf(k, "%s_count", s_timer->key);
+              SEND_GMETRIC_DOUBLE(s_timer->key, k, s_timer->count, "count");
               if (k) free(k);
             }
           }
@@ -1132,7 +1144,7 @@ void p_thread_flush(void *ptr) {
       sprintf(message, "statsd.numStats %d %ld\n", numStats, ts);
 #endif
       if (enable_gmetric) {
-        SEND_GMETRIC_DOUBLE("statd_numStats", numStats, "no units");
+        SEND_GMETRIC_DOUBLE("statsd", "statsd_numStats", numStats, "count");
       }
 #ifdef SEND_GRAPHITE
       if (statString) {
