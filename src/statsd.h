@@ -61,17 +61,18 @@
  * GMETRIC SENDING
  */
 
-#define SEND_GMETRIC_DOUBLE(myname, myvalue, myunit) { \
+#define SEND_GMETRIC_DOUBLE(mygroup, myname, myvalue, myunit) { \
 	gmetric_message_t msg = { \
 		.format = GMETRIC_FORMAT_31, \
 		.type = GMETRIC_VALUE_DOUBLE, \
 		.name = myname, \
+                .group = mygroup, \
 		.hostname = ganglia_spoof, \
 		.value.v_double = myvalue, \
 		.units = myunit, \
 		.slope = GMETRIC_SLOPE_BOTH, \
-		.tmax = flush_interval, \
-		.dmax = 0, \
+		.tmax = 60, \
+		.dmax = flush_interval + 10, \
 		.spoof = 1 \
 	}; \
 	int len = gmetric_send(&gm, &msg); \
@@ -81,17 +82,18 @@
 		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
 	}
-#define SEND_GMETRIC_INT(myname, myvalue, myunit) { \
+#define SEND_GMETRIC_INT(mygroup, myname, myvalue, myunit) { \
 	gmetric_message_t msg = { \
 		.format = GMETRIC_FORMAT_31, \
 		.type = GMETRIC_VALUE_INT, \
 		.name = myname, \
+                .group = mygroup, \
 		.hostname = ganglia_spoof, \
 		.value.v_double = myvalue, \
 		.units = myunit, \
 		.slope = GMETRIC_SLOPE_BOTH, \
-		.tmax = flush_interval, \
-		.dmax = 0, \
+		.tmax = 60, \
+		.dmax = flush_interval + 10, \
 		.spoof = 1 \
 	}; \
 	int len = gmetric_send(&gm, &msg); \
@@ -111,7 +113,7 @@
 		.units = myunit, \
 		.slope = GMETRIC_SLOPE_BOTH, \
 		.tmax = flush_interval, \
-		.dmax = 0, \
+		.dmax = 30, \
 		.spoof = 1 \
 	}; \
 	int len = gmetric_send(&gm, &msg); \
