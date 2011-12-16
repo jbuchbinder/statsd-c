@@ -1031,10 +1031,9 @@ void p_thread_flush(void *ptr) {
           /* Sort all values in this timer list */
           wait_for_timers_lock();
           utarray_sort(s_timer->values, double_sort);
-          remove_timers_lock();
 
-          double min = -1;
-          double max = -1;
+          double min = 0;
+          double max = 0;
           {
             double *i = NULL; int count = 0;
             while( (i=(double *) utarray_next( s_timer->values, i)) ) {
@@ -1045,26 +1044,34 @@ void p_thread_flush(void *ptr) {
                 if (*i < min) min = *i;
                 if (*i > max) max = *i;
               }
+              count++;
             }
-            count++;
           }
 
           double mean = min;
           double maxAtThreshold = max;
 
           if (s_timer->count > 1) {
-            double thresholdIndex = ((100 - pctThreshold) / 100) * s_timer->count;
-            int numInThreshold = s_timer->count - thresholdIndex;
-            maxAtThreshold = * ( utarray_eltptr( s_timer->values, numInThreshold - 1 ) );
+	    
+	    // Find the index of the 90th percentile threshold
+            int thresholdIndex = ( pctThreshold / 100.0 ) * s_timer->count;
+            maxAtThreshold = * ( utarray_eltptr( s_timer->values, thresholdIndex - 1 ) );
+	    printf("Count = %d Thresh = %d, MaxThreshold = %f\n", s_timer->count, thresholdIndex, maxAtThreshold);
 
             double sum = 0;
             double *i = NULL; int count = 0;
-            while( (i=(double *) utarray_next( s_timer->values, i)) && count < numInThreshold ) {
+            while( (i=(double *) utarray_next( s_timer->values, i)) && count < s_timer->count - 1 ) {
               sum += *i;
               count++;
             }
-            mean = sum / numInThreshold;
+            mean = sum / s_timer->count;
           }
+
+          /* Clear all values for this timer */
+          utarray_clear(s_timer->values);
+          s_timer->count = 0;
+          remove_timers_lock();
+
 
 #ifdef SEND_GRAPHITE
           char *message = malloc(sizeof(char) * BUFLEN);
@@ -1080,12 +1087,6 @@ void p_thread_flush(void *ptr) {
             s_timer->key, s_timer->count, ts
           );
 #endif
-
-          /* Clear all values for this timer */
-          wait_for_timers_lock();
-          utarray_clear(s_timer->values);
-          s_timer->count = 0;
-          remove_timers_lock();
 
           if (enable_gmetric) {
             {
@@ -1144,7 +1145,7 @@ void p_thread_flush(void *ptr) {
       sprintf(message, "statsd.numStats %d %ld\n", numStats, ts);
 #endif
       if (enable_gmetric) {
-        SEND_GMETRIC_DOUBLE("statsd", "statsd_numStats", numStats, "count");
+        SEND_GMETRIC_DOUBLE("statsd", "statsd_numstats_collected", numStats, "count");
       }
 #ifdef SEND_GRAPHITE
       if (statString) {
