@@ -1,0 +1,13 @@
+/*
+ *          STATSD-C
+ *          C port of Etsy's node.js-based statsd server
+ *
+ *          http://github.com/jbuchbinder/statsd-c
+ *
+ */
+
+#define STATSD_VERSION @STATSD_VERSION@
+
+#cmakedefine HAVE_LIMITS_H 1
+#cmakedefine HAVE_VASPRINTF
+

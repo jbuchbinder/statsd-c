@@ -6,6 +6,8 @@
  *
  */
 
+#include "config.h"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -143,7 +145,7 @@ void usage(char *argv[]) {
   fprintf(stderr, "\t-c counter       Counter name (required, or timer)\n");
   fprintf(stderr, "\t-t timer         Timer name (required, or counter)\n");
   fprintf(stderr, "\t-v value         Value (required)\n");
-  fprintf(stderr, "\t-P               Performance testing mode (disabled by default\n");
+  fprintf(stderr, "\t-P               Performance testing mode (disabled by default)\n");
   fprintf(stderr, "\nBoth a counter and timer cannot exist at the same time.\n");
 }
 

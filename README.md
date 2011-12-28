@@ -14,8 +14,8 @@ There are some libraries used/included:
 * [json-c](http://oss.metaparadigm.com/json-c/) : JSON (de)serialization (BSD)
 * [uthash](http://uthash.sourceforge.net/ ): Hash management "library" (BSD)
 
-Build with "make". A simple client to submit data called "statsd_client" is
-built as well.
+Build with "cmake . && make". A simple client to submit data called
+"statsd_client" is built as well.
 
 FEATURES
 --------

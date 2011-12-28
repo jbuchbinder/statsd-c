@@ -6,6 +6,8 @@
  *
  */
 
+#include "config.h"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -23,6 +25,9 @@
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#ifdef HAVE_LIMITS_H
+#include <limits.h>
+#endif /* HAVE_LIMITS_H */
 
 #include "json-c/json.h"
 #include "uthash/utarray.h"
