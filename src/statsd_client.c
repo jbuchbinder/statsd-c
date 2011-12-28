@@ -8,17 +8,27 @@
 
 #include "config.h"
 
+#ifdef HAVE_ARPA_INET_H
 #include <arpa/inet.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
+#endif
+#ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
+#endif
 #include <sys/types.h>
 #include <rpc/rpc.h>
 #include <getopt.h>
+#ifdef HAVE_NETDB_H
 #include <netdb.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef HAVE_TIME_H
 #include <time.h>
+#endif
 
 uint32_t *resolve_host(const char *addr);
 void usage(char *argv[]);

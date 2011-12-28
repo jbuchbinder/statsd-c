@@ -2,6 +2,8 @@ CMakeCache.txt
 CMakeFiles
 cmake_install.cmake
 config.h
+CPackConfig.cmake
+CPackSourceConfig.cmake
 Makefile
 statsd
 statsd_client

@@ -8,26 +8,44 @@
 
 #include "config.h"
 
+#ifdef HAVE_ARPA_INET_H
 #include <arpa/inet.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
+#endif
+#ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
+#endif
+#ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
+#endif
+#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
+#endif
 #include <sys/types.h>
 #include <errno.h>
+#ifdef HAVE_FCNTL_H
 #include <fcntl.h>
+#endif
+#ifdef HAVE_PTHREAD_H
 #include <pthread.h>
+#endif
+#ifdef HAVE_SEMAPHORE_H
 #include <semaphore.h>
+#endif
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#ifdef HAVE_UNISTD_H
 #include <unistd.h>
+#endif
 #ifdef HAVE_LIMITS_H
 #include <limits.h>
-#endif /* HAVE_LIMITS_H */
+#endif
 
 #include "json-c/json.h"
 #include "uthash/utarray.h"
