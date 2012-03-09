@@ -782,7 +782,7 @@ void p_thread_queue(void *ptr) {
       char buf_in[BUFLEN];
       memset(&buf_in, 0, sizeof(buf_in));
       strcpy(buf_in, packet);
-      
+
       if (buf_in[0] == '{' || buf_in[0] == '[') {
         syslog(LOG_DEBUG, "Queue: Processing as JSON packet");
         process_json_stats_packet(buf_in);
@@ -792,6 +792,7 @@ void p_thread_queue(void *ptr) {
       }
       packet = queue_pop_first();
     }
+    sleep(100);
   }
 
   syslog(LOG_INFO, "Thread[Queue]: Ending thread %d\n", (int) *((int *) ptr));
