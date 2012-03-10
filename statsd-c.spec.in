@@ -24,9 +24,11 @@ cmake .
 make all
 
 %install
-# install the js files which to the work
+# install binaries
 %{__mkdir_p} %{buildroot}/usr/sbin
-%{__install} -Dp -m0644 statsd %{buildroot}/usr/sbin/statsd-c
+%{__install} -Dp -m0755 statsd %{buildroot}/usr/sbin/statsd-c
+%{__mkdir_p} %{buildroot}/usr/bin
+%{__install} -Dp -m0755 statsd %{buildroot}/usr/bin/statsd_client
 
 # Install init scripts
 %{__install} -Dp -m0755 redhat/statsd-c %{buildroot}%{_initrddir}/%{name}
@@ -68,7 +70,7 @@ chkconfig --add %{name}
 
 %files
 %defattr(-,root,root,-)
-%doc README.md
+%doc README.md LICENSE TODO VERSION
 
 /usr/sbin/statsd-c
 /usr/bin/statsd_client
