@@ -1,0 +1,21 @@
+#
+# Configuration options for statsd-c
+#
+#    -p port           set statsd udp listener port (default 8125)
+#    -m port           set statsd management port (default 8126)
+#    -s file           serialize state to and from file (default disabled)
+#    -G host           ganglia host (default disabled)
+#    -g port           ganglia port (default 8649)
+#    -S spoofhost      ganglia spoof host (default statsd:statsd)
+#    -P prefix         ganglia metric prefix (default is none)
+#    -l lockfile       lock file (only used when daemonizing)
+#    -h                this help display
+#    -d                enable debug
+#    -D                daemonize
+#    -f                enable friendly mode (breaks wire compatibility)
+#    -F seconds        set flush interval in seconds (default 10)
+#    -c                clear stats on startup
+#
+
+STATSD_OPTIONS=" -D -l /var/lock/statsd-c -s /var/lib/statsd-c/state.json -F 60 "
+

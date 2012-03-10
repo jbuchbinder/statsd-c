@@ -1,0 +1,80 @@
+Name:           statsd-c
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        statsd C port
+Group:          Applications/Internet
+License:        GPL
+URL:            https://github.com/jbuchbinder/statsd-c
+Vendor:         jbuchbinder
+Packager:       Jeff Buchbinder <jeff@freemedsoftware.org>
+Source0:        %{name}-%{version}.tar.gz
+BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+BuildArch:      noarch
+
+Requires:       nodejs
+
+%description
+Reimplementation of Etsy's infamous "statsd" in C.
+
+%prep
+%setup -q
+cmake . 
+
+%build
+make all
+
+%install
+# install the js files which to the work
+%{__mkdir_p} %{buildroot}/usr/sbin
+%{__install} -Dp -m0644 statsd %{buildroot}/usr/sbin/statsd-c
+
+# Install init scripts
+%{__install} -Dp -m0755 redhat/statsd-c %{buildroot}%{_initrddir}/%{name}
+
+# State files...
+%{__mkdir_p} %{buildroot}%{_localstatedir}/lib/%{name}
+
+# Install default configuration files
+%{__mkdir_p} %{buildroot}%{_sysconfdir}/%{name}
+%{__install} -Dp -m0644 redhat/config  %{buildroot}%{_sysconfdir}/%{name}/config
+
+%{__mkdir_p} %{buildroot}%{_localstatedir}/lock/subsys
+touch %{buildroot}%{_localstatedir}/lock/subsys/%{name}
+
+%pre
+getent group %{name} >/dev/null || groupadd -r %{name}
+getent passwd %{name} >/dev/null || \
+    useradd -r -g %{name} -d %{_localstatedir}/lib/%{name} \
+    -s /sbin/nologin -c "%{name} daemon" %{name}
+exit 0
+
+%preun
+service %{name} stop
+exit 0
+
+%postun
+if [ $1 = 0 ]; then
+	chkconfig --del %{name}
+	getent passwd %{name} >/dev/null && \
+	userdel -r %{name} 2>/dev/null
+fi
+exit 0
+
+%post
+chkconfig --add %{name}
+
+%clean
+[ "%{buildroot}" != "/" ] && %{__rm} -rf %{buildroot}
+
+%files
+%defattr(-,root,root,-)
+%doc README.md
+
+/usr/sbin/statsd-c
+/usr/bin/statsd_client
+%{_initrddir}/%{name}
+%config %{_localstatedir}/lib/%{name}
+%config %{_sysconfdir}/%{name}
+%ghost %{_localstatedir}/lock/subsys/%{name}
+
+%changelog

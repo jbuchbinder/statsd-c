@@ -1,0 +1,109 @@
+#!/bin/bash
+#
+#	/etc/rc.d/init.d/statsd-c
+#
+# Starts the statsd-c daemon
+#
+# chkconfig: 2345 20 80
+# description: Reimplementation of Etsy's infamous "statsd" in C.
+# processname: statsd-c
+
+### BEGIN INIT INFO
+# Provides: statsd-c
+# Defalt-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Description: Reimplementation of Etsy's infamous "statsd" in C.
+### END INIT INFO
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+NAME=statsd-c
+NODE_EXE=/usr/bin/nodejs
+VDED_OPTIONS=
+LOGFILE=/var/log/statsd-c.log
+
+[ -x $NODE_EXE ] || exit 0
+[ -f /usr/sbin/$NAME ] || exit 0
+[ -f /etc/statsd-c/config ] && . /etc/statsd-c/config
+
+RETVAL=0
+
+#
+# See how we were called.
+#
+
+start() {
+	# Check if it is already running
+	if [ ! -f /var/lock/subsys/$NAME ]; then
+	    echo -n $"Starting $NAME daemon: "
+        # daemon
+        $NODE_EXE /usr/sbin/statsd-c $STATSD_OPTIONS >> $LOGFILE 2>&1 &
+	      RETVAL=$?
+        if [ $RETVAL -eq 0 ]; then
+            touch /var/lock/subsys/$NAME
+            echo_success
+        else
+            echo_failure
+        fi
+	    echo
+	fi
+	return $RETVAL
+}
+
+stop() {
+	echo -n $"Stopping $NAME daemon: "
+    pid=$(ps aux | grep statsd-c | grep -v grep | awk '{print $2}')
+    kill $pid
+	RETVAL=$?
+    rm -f /var/lock/subsys/$NAME
+    echo_success
+	echo
+    return 0
+}
+
+
+restart() {
+	stop
+	start
+}	
+
+reload() {
+	trap "" SIGHUP
+	killall -HUP statsd-c
+}	
+
+case "$1" in
+start)
+	start
+	;;
+stop)
+	stop
+	;;
+reload)
+	reload
+	;;
+restart)
+	restart
+	;;
+condrestart)
+	if [ -f /var/lock/subsys/$NAME ]; then
+	    restart
+	fi
+	;;
+status)
+	if [ -f /var/lock/subsys/$NAME ]; then
+        echo "$NAME is running"
+        exit 0
+    else
+        echo "$NAME is stopped"
+        exit 3
+    fi
+	;;
+*)
+	echo $"Usage: $0 {start|stop|status|restart|condrestart|reload}"
+	exit 1
+esac
+
+exit $RETVAL
+
