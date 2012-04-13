@@ -748,10 +748,12 @@ void p_thread_udp(void *ptr) {
       if (FD_ISSET(stats_udp_socket, &read_flags)) {
         FD_CLR(stats_udp_socket, &read_flags);
         memset(&buf_in, 0, sizeof(buf_in));
-        if (read(stats_udp_socket, buf_in, sizeof(buf_in)-1) <= 0) {
+        if (read(stats_udp_socket, buf_in, sizeof(buf_in)) <= 0) {
           close(stats_udp_socket);
           break;
         }
+        /* make sure that the buf_in is NULL terminated */
+        buf_in[BUFLEN - 1] = 0;
 
         syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n", 
             inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf_in);
