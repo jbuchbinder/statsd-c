@@ -673,7 +673,7 @@ void process_stats_packet(char buf_in[]) {
       } else {
         /* Handle non-timer, as counter */
         if (s_sample_rate && *s_sample_rate == '@') {
-          sample_rate = strtod( (char *) *(s_sample_rate + 1), (char **) NULL );
+          sample_rate = strtod( (s_sample_rate + 1), (char **) NULL );
         }
         update_counter(key_name, value, sample_rate);
         syslog(LOG_DEBUG, "Found key name '%s'\n", key_name);
