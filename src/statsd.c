@@ -756,8 +756,7 @@ void p_thread_udp(void *ptr) {
         syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n", 
             inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf_in);
 
-        char *packet = malloc(sizeof(buf_in) + 1);
-        packet = strdup(buf_in);
+        char *packet = strdup(buf_in);
         syslog(LOG_DEBUG, "UDP: Storing packet in queue");
         queue_store( packet );
         syslog(LOG_DEBUG, "UDP: Stored packet in queue");
