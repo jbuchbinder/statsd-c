@@ -99,7 +99,7 @@ void p_thread_flush(void *ptr);
 void p_thread_queue(void *ptr);
 
 void init_stats() {
-  char *startup_time = malloc(12);
+  char startup_time[12];
   sprintf(startup_time, "%ld", time(NULL));
 
   if (serialize_file && !clear_stats) {
@@ -113,8 +113,6 @@ void init_stats() {
   update_stat( "graphite", "last_flush", startup_time );
   update_stat( "messages", "last_msg_seen", startup_time );
   update_stat( "messages", "bad_lines_seen", "0" );
-
-  if (startup_time) free(startup_time);
 }
 
 void cleanup() {
