@@ -611,7 +611,6 @@ void process_stats_packet(char buf_in[]) {
     if (token == NULL) { break; }
     if (i == 1) {
       syslog(LOG_DEBUG, "Found token '%s', key name\n", token);
-      key_name = malloc( strlen(token) + 1);
       key_name = strdup( token );
       sanitize_key(key_name);
       /* break; */
@@ -656,7 +655,6 @@ void process_stats_packet(char buf_in[]) {
             case 3:
               syslog(LOG_DEBUG, "case 3");
               if (subtoken == NULL) { break ; }
-              s_sample_rate = malloc(strlen(subtoken) + 1);
               s_sample_rate = strdup(subtoken);
               break;
           }
@@ -748,16 +746,17 @@ void p_thread_udp(void *ptr) {
       if (FD_ISSET(stats_udp_socket, &read_flags)) {
         FD_CLR(stats_udp_socket, &read_flags);
         memset(&buf_in, 0, sizeof(buf_in));
-        if (read(stats_udp_socket, buf_in, sizeof(buf_in)-1) <= 0) {
+        if (read(stats_udp_socket, buf_in, sizeof(buf_in)) <= 0) {
           close(stats_udp_socket);
           break;
         }
+        /* make sure that the buf_in is NULL terminated */
+        buf_in[BUFLEN - 1] = 0;
 
         syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n", 
             inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf_in);
 
-        char *packet = malloc(sizeof(buf_in) + 1);
-        packet = strdup(buf_in);
+        char *packet = strdup(buf_in);
         syslog(LOG_DEBUG, "UDP: Storing packet in queue");
         queue_store( packet );
         syslog(LOG_DEBUG, "UDP: Stored packet in queue");
@@ -1007,7 +1006,6 @@ void p_thread_flush(void *ptr) {
               k = malloc(strlen(s_counter->key) + strlen(ganglia_metric_prefix) + 1);
               sprintf(k, "%s%s", ganglia_metric_prefix, s_counter->key);
             } else {
-              k = malloc(strlen(s_counter->key) + 1);
               k = strdup(s_counter->key);
             }
             SEND_GMETRIC_DOUBLE(k, k, value, "count");
