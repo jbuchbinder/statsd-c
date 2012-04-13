@@ -77,7 +77,7 @@
 	}; \
 	int len = gmetric_send(&gm, &msg); \
 	if (len != -1) { \
-		syslog(LOG_INFO, "Sending gmetric DOUBLE message %s length %d", myname, len); \
+		syslog(LOG_INFO, "Sent gmetric DOUBLE message %s length %d", myname, len); \
 	} else { \
 		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
@@ -98,7 +98,7 @@
 	}; \
 	int len = gmetric_send(&gm, &msg); \
 	if (len != -1) { \
-		syslog(LOG_INFO, "Sending gmetric INT message %s length %d", myname, len); \
+		syslog(LOG_INFO, "Sent gmetric INT message %s length %d", myname, len); \
 	} else { \
 		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
@@ -118,7 +118,7 @@
 	}; \
 	int len = gmetric_send(&gm, &msg); \
 	if (len != -1) { \
-		syslog(LOG_INFO, "Sending gmetric STRING message %s length %d", myname, len); \
+		syslog(LOG_INFO, "Sent gmetric STRING message %s length %d", myname, len); \
 	} else { \
 		syslog(LOG_ERR, "Failed to send gmetric %s", myname); \
 	} \
