@@ -28,25 +28,25 @@
 	if (z) free(z); \
 	}
 #define STREAM_SEND_INT(x,y) { \
-	char *z = malloc(sizeof(char *)); \
+	char *z = malloc(32); \
 	sprintf(z, "%d", y); \
 	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
 	if (z) free(z); \
 	}
 #define STREAM_SEND_DOUBLE(x,y) { \
-	char *z = malloc(sizeof(char *)); \
+	char *z = malloc(32); \
 	sprintf(z, "%f", y); \
 	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
 	if (z) free(z); \
 	}
 #define STREAM_SEND_LONG_DOUBLE(x,y) { \
-	char *z = malloc(sizeof(char *)); \
+	char *z = malloc(32); \
 	sprintf(z, "%Lf", y); \
 	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
 	if (z) free(z); \
 	}
 #define UPDATE_LAST_MSG_SEEN() { \
-	char *time_sec = malloc(sizeof(char *)); \
+	char *time_sec = malloc(32); \
 	sprintf(time_sec, "%ld", time(NULL)); \
 	update_stat( "messages", "last_msg_seen", time_sec); \
 	if (time_sec) free(time_sec); \
