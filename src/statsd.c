@@ -99,7 +99,7 @@ void p_thread_flush(void *ptr);
 void p_thread_queue(void *ptr);
 
 void init_stats() {
-  char *startup_time = malloc(sizeof(char *));
+  char *startup_time = malloc(12);
   sprintf(startup_time, "%ld", time(NULL));
 
   if (serialize_file && !clear_stats) {
@@ -758,7 +758,7 @@ void p_thread_udp(void *ptr) {
         syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n", 
             inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf_in);
 
-        char *packet = malloc(sizeof(buf_in));
+        char *packet = malloc(sizeof(buf_in) + 1);
         packet = strdup(buf_in);
         syslog(LOG_DEBUG, "UDP: Storing packet in queue");
         queue_store( packet );
@@ -1006,20 +1006,20 @@ void p_thread_flush(void *ptr) {
           {
             char *k = NULL;
             if (ganglia_metric_prefix != NULL) {
-              k = malloc(strlen(s_counter->key) + strlen(ganglia_metric_prefix));
+              k = malloc(strlen(s_counter->key) + strlen(ganglia_metric_prefix) + 1);
               sprintf(k, "%s%s", ganglia_metric_prefix, s_counter->key);
             } else {
-              k = malloc(strlen(s_counter->key));
+              k = malloc(strlen(s_counter->key) + 1);
               k = strdup(s_counter->key);
             }
             SEND_GMETRIC_DOUBLE(k, k, value, "count");
             if (k) free(k);
           }
           {
-            char *k = malloc(strlen(s_counter->key) + 13);
+            //char *k = malloc(strlen(s_counter->key) + 13);
             // sprintf(k, "%s", s_counter->key);
             SEND_GMETRIC_DOUBLE(s_counter->key, s_counter->key, s_counter->value, "count");
-            if (k) free(k);
+            //if (k) free(k);
           }
         }
 #ifdef SEND_GRAPHITE
@@ -1116,33 +1116,33 @@ void p_thread_flush(void *ptr) {
             {
 	      
 	      // Mean value. Convert to seconds
-              char *k = malloc(strlen(s_timer->key) + 5);
+              char *k = malloc(strlen(s_timer->key) + 6);
               sprintf(k, "%s_mean", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, mean/1000, "sec");
               if (k) free(k);
             }
             {
 	      // Max value. Convert to seconds
-              char *k = malloc(strlen(s_timer->key) + 6);
+              char *k = malloc(strlen(s_timer->key) + 7);
               sprintf(k, "%s_upper", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, max/1000, "sec");
               if (k) free(k);
             }
             {
 	      // Percentile value. Convert to seconds
-              char *k = malloc(strlen(s_timer->key) + 10);
+              char *k = malloc(strlen(s_timer->key) + 12);
               sprintf(k, "%s_%dth_pct", s_timer->key, pctThreshold);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, maxAtThreshold/1000, "sec");
               if (k) free(k);
             }
             {
-              char *k = malloc(strlen(s_timer->key) + 6);
+              char *k = malloc(strlen(s_timer->key) + 7);
               sprintf(k, "%s_lower", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, min/1000, "sec");
               if (k) free(k);
             }
             {
-              char *k = malloc(strlen(s_timer->key) + 6);
+              char *k = malloc(strlen(s_timer->key) + 7);
               sprintf(k, "%s_count", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, s_timer->count, "count");
               if (k) free(k);
