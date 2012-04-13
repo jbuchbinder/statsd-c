@@ -611,7 +611,6 @@ void process_stats_packet(char buf_in[]) {
     if (token == NULL) { break; }
     if (i == 1) {
       syslog(LOG_DEBUG, "Found token '%s', key name\n", token);
-      key_name = malloc( strlen(token) + 1);
       key_name = strdup( token );
       sanitize_key(key_name);
       /* break; */
@@ -656,7 +655,6 @@ void process_stats_packet(char buf_in[]) {
             case 3:
               syslog(LOG_DEBUG, "case 3");
               if (subtoken == NULL) { break ; }
-              s_sample_rate = malloc(strlen(subtoken) + 1);
               s_sample_rate = strdup(subtoken);
               break;
           }
@@ -1008,7 +1006,6 @@ void p_thread_flush(void *ptr) {
               k = malloc(strlen(s_counter->key) + strlen(ganglia_metric_prefix) + 1);
               sprintf(k, "%s%s", ganglia_metric_prefix, s_counter->key);
             } else {
-              k = malloc(strlen(s_counter->key) + 1);
               k = strdup(s_counter->key);
             }
             SEND_GMETRIC_DOUBLE(k, k, value, "count");
