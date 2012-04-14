@@ -24,6 +24,7 @@
 #include "bits.h"
 #include "debug.h"
 #include "printbuf.h"
+#include "config.h"
 
 struct printbuf* printbuf_new(void)
 {
@@ -61,7 +62,7 @@ int printbuf_memappend(struct printbuf *p, const char *buf, int size)
   return size;
 }
 
-#if !HAVE_VASPRINTF
+#ifndef HAVE_VASPRINTF
 /* CAW: compliant version of vasprintf */
 static int vasprintf(char **buf, const char *fmt, va_list ap)
 {
