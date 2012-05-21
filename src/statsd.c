@@ -909,12 +909,12 @@ void p_thread_mgmt(void *ptr) {
                 STREAM_SEND_INT(i, s_timer->count)
                 if (s_timer->count > 0) {
                   double *j = NULL; bool first = 1;
-		  STREAM_SEND(i, " [")
+                  STREAM_SEND(i, " [")
                   while( (j=(double *)utarray_next(s_timer->values, j)) ) {
                     if (first == 1) { first = 0; STREAM_SEND(i, ",") }
                     STREAM_SEND_DOUBLE(i, *j)
                   }
-		  STREAM_SEND(i, "]")
+                  STREAM_SEND(i, "]")
                 }
                 STREAM_SEND(i, "\n")
               }
@@ -1072,11 +1072,10 @@ void p_thread_flush(void *ptr) {
           double maxAtThreshold = max;
 
           if (s_timer->count > 1) {
-	    
-	    // Find the index of the 90th percentile threshold
+            // Find the index of the 90th percentile threshold
             int thresholdIndex = ( pctThreshold / 100.0 ) * s_timer->count;
             maxAtThreshold = * ( utarray_eltptr( s_timer->values, thresholdIndex - 1 ) );
-	    printf("Count = %d Thresh = %d, MaxThreshold = %f\n", s_timer->count, thresholdIndex, maxAtThreshold);
+            printf("Count = %d Thresh = %d, MaxThreshold = %f\n", s_timer->count, thresholdIndex, maxAtThreshold);
 
             double sum = 0;
             double *i = NULL; int count = 0;
@@ -1110,22 +1109,21 @@ void p_thread_flush(void *ptr) {
 
           if (enable_gmetric) {
             {
-	      
-	      // Mean value. Convert to seconds
+              // Mean value. Convert to seconds
               char *k = malloc(strlen(s_timer->key) + 6);
               sprintf(k, "%s_mean", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, mean/1000, "sec");
               if (k) free(k);
             }
             {
-	      // Max value. Convert to seconds
+              // Max value. Convert to seconds
               char *k = malloc(strlen(s_timer->key) + 7);
               sprintf(k, "%s_upper", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, max/1000, "sec");
               if (k) free(k);
             }
             {
-	      // Percentile value. Convert to seconds
+              // Percentile value. Convert to seconds
               char *k = malloc(strlen(s_timer->key) + 12);
               sprintf(k, "%s_%dth_pct", s_timer->key, pctThreshold);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, maxAtThreshold/1000, "sec");
