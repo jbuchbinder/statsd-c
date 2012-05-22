@@ -22,34 +22,29 @@
 #define THREAD_SLEEP(x) { pthread_mutex_t fakeMutex = PTHREAD_MUTEX_INITIALIZER; pthread_cond_t fakeCond = PTHREAD_COND_INITIALIZER; struct timespec timeToWait; struct timeval now; int rt; gettimeofday(&now,NULL); timeToWait.tv_sec = now.tv_sec + x; timeToWait.tv_nsec = now.tv_usec; pthread_mutex_lock(&fakeMutex); rt = pthread_cond_timedwait(&fakeCond, &fakeMutex, &timeToWait); if (rt != 0) { } pthread_mutex_unlock(&fakeMutex); }
 #define STREAM_SEND(x,y) if (send(x, y, strlen(y), 0) == -1) { perror("send error"); }
 #define STREAM_SEND_LONG(x,y) { \
-	char *z = malloc(sizeof(char *)); \
+	char z[32]; \
 	sprintf(z, "%ld", y); \
 	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
-	if (z) free(z); \
 	}
 #define STREAM_SEND_INT(x,y) { \
-	char *z = malloc(32); \
+	char z[32]; \
 	sprintf(z, "%d", y); \
 	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
-	if (z) free(z); \
 	}
 #define STREAM_SEND_DOUBLE(x,y) { \
-	char *z = malloc(32); \
+	char z[32]; \
 	sprintf(z, "%f", y); \
 	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
-	if (z) free(z); \
 	}
 #define STREAM_SEND_LONG_DOUBLE(x,y) { \
-	char *z = malloc(32); \
+	char z[32]; \
 	sprintf(z, "%Lf", y); \
 	if (send(x, z, strlen(z), 0) == -1) { perror("send error"); } \
-	if (z) free(z); \
 	}
 #define UPDATE_LAST_MSG_SEEN() { \
-	char *time_sec = malloc(32); \
+	char time_sec[32]; \
 	sprintf(time_sec, "%ld", time(NULL)); \
 	update_stat( "messages", "last_msg_seen", time_sec); \
-	if (time_sec) free(time_sec); \
 	}
 
 #define MGMT_END "END\n\n"
@@ -62,16 +57,18 @@
  */
 
 #define SEND_GMETRIC_DOUBLE(mygroup, myname, myvalue, myunit) { \
+	char mystringvalue[30]; \
+	sprintf(mystringvalue, "%Lf", (long double) myvalue); \
 	gmetric_message_t msg = { \
 		.format = GMETRIC_FORMAT_31, \
 		.type = GMETRIC_VALUE_DOUBLE, \
 		.name = myname, \
-                .group = mygroup, \
+    .group = mygroup, \
 		.hostname = ganglia_spoof, \
-		.value.v_double = myvalue, \
+		.value.v_string = mystringvalue, \
 		.units = myunit, \
 		.slope = GMETRIC_SLOPE_BOTH, \
-		.tmax = 60, \
+		.tmax = flush_interval + 10, \
 		.dmax = flush_interval + 10, \
 		.spoof = 1 \
 	}; \
@@ -83,16 +80,18 @@
 	} \
 	}
 #define SEND_GMETRIC_INT(mygroup, myname, myvalue, myunit) { \
+	char mystringvalue[30]; \
+	sprintf(mystringvalue, "%d", myvalue); \
 	gmetric_message_t msg = { \
 		.format = GMETRIC_FORMAT_31, \
 		.type = GMETRIC_VALUE_INT, \
 		.name = myname, \
-                .group = mygroup, \
+    .group = mygroup, \
 		.hostname = ganglia_spoof, \
-		.value.v_double = myvalue, \
+		.value.v_string = mystringvalue, \
 		.units = myunit, \
 		.slope = GMETRIC_SLOPE_BOTH, \
-		.tmax = 60, \
+		.tmax = flush_interval + 10, \
 		.dmax = flush_interval + 10, \
 		.spoof = 1 \
 	}; \
@@ -108,12 +107,13 @@
 		.format = GMETRIC_FORMAT_31, \
 		.type = GMETRIC_VALUE_STRING, \
 		.name = myname, \
+    .group = mygroup, \
 		.hostname = ganglia_spoof, \
-		.value.v_double = myvalue, \
+		.value.v_string = myvalue, \
 		.units = myunit, \
 		.slope = GMETRIC_SLOPE_BOTH, \
-		.tmax = flush_interval, \
-		.dmax = 30, \
+		.tmax = flush_interval + 10, \
+		.dmax = flush_interval + 10, \
 		.spoof = 1 \
 	}; \
 	int len = gmetric_send(&gm, &msg); \

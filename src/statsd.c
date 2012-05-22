@@ -996,7 +996,7 @@ void p_thread_flush(void *ptr) {
       HASH_ITER(hh, counters, s_counter, tmp) {
         long double value = s_counter->value / flush_interval;
 #ifdef SEND_GRAPHITE
-        char *message = malloc(sizeof(char) * BUFLEN);
+        char message[BUFLEN];
         sprintf(message, "stats.%s %Lf %ld\nstats_counts_%s %Lf %ld\n", s_counter->key, value, ts, s_counter->key, s_counter->value, ts);
 #endif
         if (enable_gmetric) {
@@ -1093,7 +1093,7 @@ void p_thread_flush(void *ptr) {
 
 
 #ifdef SEND_GRAPHITE
-          char *message = malloc(sizeof(char) * BUFLEN);
+          char message[BUFLEN];
           sprintf(message, "stats.timers.%s.mean %f %ld\n"
             "stats.timers.%s.upper %f %ld\n"
             "stats.timers.%s.upper_%d %f %ld\n"
@@ -1110,36 +1110,31 @@ void p_thread_flush(void *ptr) {
           if (enable_gmetric) {
             {
               // Mean value. Convert to seconds
-              char *k = malloc(strlen(s_timer->key) + 6);
+              char k[strlen(s_timer->key) + 6];
               sprintf(k, "%s_mean", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, mean/1000, "sec");
-              if (k) free(k);
             }
             {
               // Max value. Convert to seconds
-              char *k = malloc(strlen(s_timer->key) + 7);
+              char k[strlen(s_timer->key) + 7];
               sprintf(k, "%s_upper", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, max/1000, "sec");
-              if (k) free(k);
             }
             {
               // Percentile value. Convert to seconds
-              char *k = malloc(strlen(s_timer->key) + 12);
+              char k[strlen(s_timer->key) + 12];
               sprintf(k, "%s_%dth_pct", s_timer->key, pctThreshold);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, maxAtThreshold/1000, "sec");
-              if (k) free(k);
             }
             {
-              char *k = malloc(strlen(s_timer->key) + 7);
+              char k[strlen(s_timer->key) + 7];
               sprintf(k, "%s_lower", s_timer->key);
               SEND_GMETRIC_DOUBLE(s_timer->key, k, min/1000, "sec");
-              if (k) free(k);
             }
             {
-              char *k = malloc(strlen(s_timer->key) + 7);
+              char k[strlen(s_timer->key) + 7];
               sprintf(k, "%s_count", s_timer->key);
-              SEND_GMETRIC_DOUBLE(s_timer->key, k, s_timer->count, "count");
-              if (k) free(k);
+              SEND_GMETRIC_INT(s_timer->key, k, s_timer->count, "count");
             }
           }
 #ifdef SEND_GRAPHITE
@@ -1163,7 +1158,7 @@ void p_thread_flush(void *ptr) {
       sprintf(message, "statsd.numStats %d %ld\n", numStats, ts);
 #endif
       if (enable_gmetric) {
-        SEND_GMETRIC_DOUBLE("statsd", "statsd_numstats_collected", numStats, "count");
+        SEND_GMETRIC_INT("statsd", "statsd_numstats_collected", numStats, "count");
       }
 #ifdef SEND_GRAPHITE
       if (statString) {
