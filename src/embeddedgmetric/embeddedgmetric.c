@@ -38,7 +38,7 @@
 #define CONVERT_TO_STRINGS
 
 static const char* typestrings[] = {
-    "", "uint16", "int16", "int32", "uint32", "string", "float", "double", "timestamp"
+    "", "string", "uint16", "int16", "uint32", "int32", "float", "double", "timestamp"
 };
 
 static const char* formatstrings[] = {
@@ -73,6 +73,7 @@ int gmetric_message_create_xdr(char* buffer, uint len,
         return -1;
     }
 
+    /*
     switch (msg->type) {
     case GMETRIC_VALUE_UNSIGNED_SHORT:
         modp_uitoa10(msg->value.v_ushort, valbuf);
@@ -120,7 +121,13 @@ int gmetric_message_create_xdr(char* buffer, uint len,
             return -1;
         }
         break;
-    }  /* end switch */
+    } */
+    /* end switch */
+
+    /* Force this to always send string */
+    if (!xdr_string(&x, (char**) &msg->value.v_string, ~0)) {
+        return -1;
+    }
 
     if (!xdr_string(&x, (char**) &msg->units, ~0)) {
         return -1;
@@ -224,7 +231,7 @@ int gmetric31_message_create_xdr(char* buffer, uint len,
                                  const gmetric_message_t* msg)
 {
     enum_t tmp = 128;
-    const char* formatstr = formatstrings[msg->type];
+    const char* formatstr = "%s"; /* Hardcoded, which is stupid, but is part of the ganglia protocol. */
     XDR x;
     xdrmem_create(&x, buffer, len, XDR_ENCODE);
 
@@ -249,6 +256,7 @@ int gmetric31_message_create_xdr(char* buffer, uint len,
         return -1;
     }
 
+    /*
     switch (msg->type) {
     case GMETRIC_VALUE_UNSIGNED_SHORT:
         if (!xdr_u_short(&x, (u_short *) &msg->value.v_ushort)) {
@@ -290,7 +298,13 @@ int gmetric31_message_create_xdr(char* buffer, uint len,
             return -1;
         }
         break;
-    }  /* end switch */
+    } */
+    /* end switch */
+
+    /* Force this to be a string, it's the standard ... */
+    if (!xdr_string(&x, (char**) &msg->value.v_string, ~0)) {
+        return -1;
+    }
 
     return xdr_getpos(&x);
 }
