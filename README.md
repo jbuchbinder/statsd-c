@@ -52,17 +52,25 @@ An example of some different inputs would be:
 
 * Increase counter 'test_counter' by 300:
 
+```
     {'counter':'test_counter','value':300}
+```
 
 * Add two counters:
 
+```
     [{'counter':'count1','value':1.0},{'counter':'count2','value':1.0}]
+```
 
 * Add a counter with a set sample rate:
 
+```
     {'counter':'sample','value':5,'sample_rate':10}
+```
 
 * Set a timer:
 
+```
     {'timer':'test_timer',value:12345}
+```
 
