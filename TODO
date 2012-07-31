@@ -11,4 +11,5 @@ TODO
 * Implement command line option handling. [DONE]
 * Extend statsd by allowing auto detection of JSON format. [DONE]
 * Implement client "performance testing" mode.
+* Potential move to poll()/epoll() from select().
 
