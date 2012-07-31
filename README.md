@@ -28,7 +28,7 @@ FEATURES
 USAGE
 -----
 
-    Usage: statsd [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile]
+    Usage: statsd [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile] [-T percentiles]
         -p port           set statsd udp listener port (default 8125)
         -m port           set statsd management port (default 8126)
         -s file           serialize state to and from file (default disabled)
@@ -43,6 +43,7 @@ USAGE
         -f                enable friendly mode (breaks wire compatibility)
         -F seconds        set flush interval in seconds (default 10)
         -c                clear stats on startup
+        -T                percentile thresholds, csv (defaults to 90)
 
 JSON FORMAT
 -----------

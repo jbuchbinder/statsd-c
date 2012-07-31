@@ -83,6 +83,7 @@ pthread_t thread_queue;
 int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT, flush_interval = FLUSH_INTERVAL;
 int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0, enable_gmetric = 0;
 char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL, *ganglia_metric_prefix = NULL, *lock_file = NULL;
+int percentiles[5], num_percentiles = 0;
 
 /*
  * FUNCTION PROTOTYPES
@@ -237,7 +238,7 @@ void daemonize_server() {
 
 void syntax(char *argv[]) {
   fprintf(stderr, "statsd-c version %s\nhttps://github.com/jbuchbinder/statsd-c\n\n", STATSD_VERSION);
-  fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile]\n", argv[0]);
+  fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile] [-T percentiles]\n", argv[0]);
   fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
   fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
   fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
@@ -252,12 +253,14 @@ void syntax(char *argv[]) {
   fprintf(stderr, "\t-f                enable friendly mode (breaks wire compatibility)\n");
   fprintf(stderr, "\t-F seconds        set flush interval in seconds (default 10)\n");
   fprintf(stderr, "\t-c                clear stats on startup\n");
+  fprintf(stderr, "\t-T                percentile thresholds, csv (defaults to 90)\n");
   exit(1);
 }
 
 int main(int argc, char *argv[]) {
   int pids[4] = { 1, 2, 3, 4 };
   int opt, rc = 0;
+  char *p_raw, *pch;
   pthread_attr_t attr;
 
   signal (SIGINT, sigint_handler);
@@ -270,7 +273,7 @@ int main(int argc, char *argv[]) {
 
   queue_init();
 
-  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:P:l:")) != -1) {
+  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:P:l:T:")) != -1) {
     switch (opt) {
       case 'd':
         printf("Debug enabled.\n");
@@ -325,11 +328,27 @@ int main(int argc, char *argv[]) {
         lock_file = strdup(optarg);
         printf("Lock file %s\n", lock_file);
         break;
+      case 'T':
+        p_raw = strdup(optarg);
+        pch = strtok (p_raw, ",");
+        while (pch != NULL)
+        {
+          percentiles[num_percentiles] = atoi(pch);
+          pch = strtok (p_raw, ",");
+          num_percentiles++;
+        }
+        printf("Percentiles %s (%d values)\n", p_raw, num_percentiles);
+        break;
       case 'h':
       default:
         syntax(argv);
         break;
     }
+  }
+
+  if (num_percentiles == 0) {
+    percentiles[0] = 90;
+    num_percentiles = 1;
   }
 
   if (ganglia_spoof == NULL) {
@@ -1095,7 +1114,7 @@ void p_thread_flush(void *ptr) {
       statsd_timer_t *s_timer, *tmp;
       HASH_ITER(hh, timers, s_timer, tmp) {
         if (s_timer->count > 0) {
-          int pctThreshold = 90; /* TODO FIXME: dynamic assignment */
+          int pctThreshold = percentiles[0]; /* TODO FIXME: support multiple percentiles */
 
           /* Sort all values in this timer list */
           wait_for_timers_lock();
