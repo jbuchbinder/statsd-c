@@ -55,6 +55,7 @@
 #include "stats.h"
 #include "timers.h"
 #include "counters.h"
+#include "gauges.h"
 #include "strings.h"
 #include "embeddedgmetric.h"
 
@@ -68,6 +69,8 @@ statsd_stat_t *stats = NULL;
 sem_t stats_lock;
 statsd_counter_t *counters = NULL;
 sem_t counters_lock;
+statsd_gauge_t *gauges = NULL;
+sem_t gauges_lock;
 statsd_timer_t *timers = NULL;
 sem_t timers_lock;
 UT_icd timers_icd = { sizeof(double), NULL, NULL, NULL };
@@ -88,6 +91,7 @@ char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL, *gangl
 void add_timer( char *key, double value );
 void update_stat( char *group, char *key, char *value);
 void update_counter( char *key, double value, double sample_rate );
+void update_gauge( char *key, double value );
 void update_timer( char *key, double value );
 void process_stats_packet(char buf_in[]);
 void process_json_stats_packet(char buf_in[]);
@@ -138,6 +142,7 @@ void cleanup() {
   sem_destroy(&stats_lock);
   sem_destroy(&timers_lock);
   sem_destroy(&counters_lock);
+  sem_destroy(&gauges_lock);
 
   syslog(LOG_INFO, "Removing lockfile %s", lock_file != NULL ? lock_file : LOCK_FILE);
   unlink(lock_file != NULL ? lock_file : LOCK_FILE);
@@ -261,6 +266,7 @@ int main(int argc, char *argv[]) {
   sem_init(&stats_lock, 0, 1);
   sem_init(&timers_lock, 0, 1);
   sem_init(&counters_lock, 0, 1);
+  sem_init(&gauges_lock, 0, 1);
 
   queue_init();
 
@@ -473,6 +479,30 @@ void update_counter( char *key, double value, double sample_rate ) {
   }
 }
 
+void update_gauge( char *key, double value ) {
+  syslog(LOG_DEBUG, "update_gauge ( %s, %f )\n", key, value);
+  statsd_gauge_t *g;
+  syslog(LOG_DEBUG, "HASH_FIND_STR '%s'\n", key);
+  HASH_FIND_STR( gauges, key, g );
+  syslog(LOG_DEBUG, "after HASH_FIND_STR '%s'\n", key);
+  if (g) {
+    syslog(LOG_DEBUG, "Updating old timer entry");
+    wait_for_gauges_lock();
+    g->value = value;
+    remove_gauges_lock();
+  } else {
+    syslog(LOG_DEBUG, "Adding new timer entry");
+    g = malloc(sizeof(statsd_gauge_t));
+
+    strcpy(g->key, key);
+    g->value = value;
+
+    wait_for_gauges_lock();
+    HASH_ADD_STR( gauges, key, g );
+    remove_gauges_lock();
+  }
+}
+
 void update_timer( char *key, double value ) {
   syslog(LOG_DEBUG, "update_timer ( %s, %f )\n", key, value);
   statsd_timer_t *t;
@@ -520,6 +550,16 @@ void dump_stats() {
         syslog(LOG_DEBUG, "%s: %Lf", c->key, c->value);
       }
       if (c) free(c);
+      if (tmp) free(tmp);
+    }
+
+    {
+      syslog(LOG_DEBUG, "Gauges dump:");
+      statsd_gauge_t *g, *tmp;
+      HASH_ITER(hh, gauges, g, tmp) {
+        syslog(LOG_DEBUG, "%s: %Lf", g->key, g->value);
+      }
+      if (g) free(g);
       if (tmp) free(tmp);
     }
   }
@@ -618,7 +658,7 @@ void process_stats_packet(char buf_in[]) {
       syslog(LOG_DEBUG, "\ttoken [#%d] = %s\n", i, token);
       char *s_sample_rate = NULL, *s_number = NULL;
       double sample_rate = 1.0;
-      bool is_timer = 0;
+      bool is_timer = 0, is_gauge = 0;
 
       if (strstr(token, "|") == NULL) {
         syslog(LOG_DEBUG, "No pipes found, basic logic");
@@ -645,10 +685,14 @@ void process_stats_packet(char buf_in[]) {
               if (strlen(subtoken) < 2) {
                 syslog(LOG_DEBUG, "subtoken length < 2");
                 is_timer = 0;
+                if (*subtoken == 'g') {
+                  is_gauge = 1;
+                }
               } else {
                 syslog(LOG_DEBUG, "subtoken length >= 2");
                 if (*subtoken == 'm' && *(subtoken + 1) == 's') {
                   is_timer = 1;
+                  is_gauge = 0;
                 }
               }
               break;
@@ -666,9 +710,14 @@ void process_stats_packet(char buf_in[]) {
       if (is_timer == 1) {
         /* ms passed, handle timer */
         update_timer( key_name, value );
+      } else if (is_gauge == 1) {
+        /* Handle non-timer, as gauge */
+        update_gauge(key_name, value);
+        syslog(LOG_DEBUG, "Found gauge key name '%s'\n", key_name);
+        syslog(LOG_DEBUG, "Found gauge value '%f'\n", value);
       } else {
+        if (s_sample_rate && *s_sample_rate == 'g') {
         /* Handle non-timer, as counter */
-        if (s_sample_rate && *s_sample_rate == '@') {
           sample_rate = strtod( (s_sample_rate + 1), (char **) NULL );
         }
         update_counter(key_name, value, sample_rate);
@@ -1151,6 +1200,56 @@ void p_thread_flush(void *ptr) {
       if (s_timer) free(s_timer);
       if (tmp) free(tmp);
     }
+
+    /* ---------------------------------------------------------------------
+      Process gauge metrics
+      -------------------------------------------------------------------- */
+
+    {
+      statsd_gauge_t *s_gauge, *tmp;
+      HASH_ITER(hh, gauges, s_gauge, tmp) {
+        long double value = s_gauge->value;
+#ifdef SEND_GRAPHITE
+        char message[BUFLEN];
+        sprintf(message, "stats.%s %Lf %ld\nstats_gauges_%s %Lf %ld\n", s_gauge->key, value, ts, s_gauge->key, s_gauge->value, ts);
+#endif
+        if (enable_gmetric) {
+          {
+            char *k = NULL;
+            if (ganglia_metric_prefix != NULL) {
+              k = malloc(strlen(s_gauge->key) + strlen(ganglia_metric_prefix) + 1);
+              sprintf(k, "%s%s", ganglia_metric_prefix, s_gauge->key);
+            } else {
+              k = strdup(s_gauge->key);
+            }
+            SEND_GMETRIC_DOUBLE(k, k, value, "gauge");
+            if (k) free(k);
+          }
+          {
+            //char *k = malloc(strlen(s_counter->key) + 13);
+            // sprintf(k, "%s", s_counter->key);
+            SEND_GMETRIC_DOUBLE(s_gauge->key, s_gauge->key, s_gauge->value, "gauge");
+            //if (k) free(k);
+          }
+        }
+#ifdef SEND_GRAPHITE
+        if (statString) {
+          statString = realloc(statString, strlen(statString) + strlen(message));
+          strcat(statString, message);
+        } else {
+          statString = strdup(message);
+        }
+#endif
+
+        numStats++;
+      }
+      if (s_gauge) free(s_gauge);
+      if (tmp) free(tmp);
+    }
+
+    /* ---------------------------------------------------------------------
+      Process totals
+      -------------------------------------------------------------------- */
 
     {
 #ifdef SEND_GRAPHITE

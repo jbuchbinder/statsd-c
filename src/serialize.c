@@ -14,6 +14,7 @@
 #include "uthash/utarray.h"
 
 #include "counters.h"
+#include "gauges.h"
 #include "stats.h"
 #include "timers.h"
 
@@ -96,6 +97,20 @@ int statsd_deserialize( char *filename ) {
     }
   }
 
+  json_object *obj_gauges = json_object_object_get(obj, "gauges");
+  {
+    json_object_object_foreach(obj_gauges, key, val) {
+      statsd_gauge_t *g = malloc(sizeof(statsd_gauge_t));
+
+      strcpy(g->key, key);
+      g->value = json_object_get_double(val);
+
+      wait_for_gauges_lock();
+      HASH_ADD_STR( gauges, key, g );
+      remove_gauges_lock();
+    }
+  }
+
   json_object *obj_counters = json_object_object_get(obj, "counters");
   {
     json_object_object_foreach(obj_counters, key, val) {
@@ -158,9 +173,19 @@ int statsd_serialize( char *filename ) {
     }
     remove_counters_lock();
   }
+  json_object *obj_gauges = json_object_new_object();
+  {
+    statsd_gauge_t *g, *tmp;
+    wait_for_gauges_lock();
+    HASH_ITER(hh, gauges, g, tmp) {
+      json_object_object_add(obj_gauges, g->key, json_object_new_double(g->value));
+    }
+    remove_gauges_lock();
+  }
 
   json_object_object_add(obj, "stats", obj_stats);
   json_object_object_add(obj, "timers", obj_timers);
+  json_object_object_add(obj, "gauges", obj_gauges);
   json_object_object_add(obj, "counters", obj_counters);
 
   fp = fopen(filename, "w");
