@@ -1,0 +1,4 @@
+language: c
+script: "cmake . && make all"
+before_script:
+  - sudo apt-get install cmake
