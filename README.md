@@ -1,6 +1,9 @@
 STATSD-C
 ========
 
+[![Build
+Status](https://secure.travis-ci.org/jbuchbinder/statsd-c.png)](http://travis-ci.org/jbuchbinder/statsd-c)
+
 SUMMARY
 -------
 
