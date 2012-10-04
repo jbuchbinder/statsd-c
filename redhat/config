@@ -17,5 +17,5 @@
 #    -c                clear stats on startup
 #
 
-STATSD_OPTIONS=" -D -l /var/lock/statsd-c -s /var/lib/statsd-c/state.json -F 60 "
+STATSD_OPTIONS=" -l /var/lock/statsd-c -s /var/lib/statsd-c/state.json -F 60 "
 

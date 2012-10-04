@@ -19,11 +19,9 @@
 . /etc/rc.d/init.d/functions
 
 NAME=statsd-c
-NODE_EXE=/usr/bin/nodejs
 VDED_OPTIONS=
 LOGFILE=/var/log/statsd-c.log
 
-[ -x $NODE_EXE ] || exit 0
 [ -f /usr/sbin/$NAME ] || exit 0
 [ -f /etc/statsd-c/config ] && . /etc/statsd-c/config
 
@@ -38,7 +36,7 @@ start() {
 	if [ ! -f /var/lock/subsys/$NAME ]; then
 	    echo -n $"Starting $NAME daemon: "
         # daemon
-        $NODE_EXE /usr/sbin/statsd-c $STATSD_OPTIONS >> $LOGFILE 2>&1 &
+        /usr/sbin/statsd-c -D $STATSD_OPTIONS >> $LOGFILE 2>&1 &
 	      RETVAL=$?
         if [ $RETVAL -eq 0 ]; then
             touch /var/lock/subsys/$NAME
