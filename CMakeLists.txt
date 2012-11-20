@@ -27,6 +27,7 @@ check_include_files ( semaphore.h HAVE_SEMAPHORE_H )
 check_include_files ( netdb.h HAVE_NETDB_H )
 check_include_files ( pthread.h HAVE_PTHREAD_H )
 check_include_files ( signal.h HAVE_SIGNAL_H )
+check_include_files ( netdb.h HAVE_NETDB_H )
 check_function_exists ( vasprintf HAVE_VASPRINTF )
 
 # Platform specific options

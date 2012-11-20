@@ -28,6 +28,9 @@
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
+#ifdef HAVE_NETDB_H
+#include <netdb.h>
+#endif
 #ifdef HAVE_PTHREAD_H
 #include <pthread.h>
 #endif
@@ -82,7 +85,7 @@ pthread_t thread_mgmt;
 pthread_t thread_flush;
 pthread_t thread_queue;
 int port = PORT, mgmt_port = MGMT_PORT, ganglia_port = GANGLIA_PORT, flush_interval = FLUSH_INTERVAL;
-int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0, enable_gmetric = 0, enable_graphite = 0;
+int debug = 0, friendly = 0, clear_stats = 0, daemonize = 0, enable_gmetric = 0, enable_graphite = 0, graphite_port = 2003;
 char *serialize_file = NULL, *ganglia_host = NULL, *ganglia_spoof = NULL, *graphite_host = NULL, *ganglia_metric_prefix = NULL, *lock_file = NULL;
 int percentiles[5], num_percentiles = 0;
 
@@ -1257,6 +1260,48 @@ void p_thread_flush(void *ptr) {
     /* TODO: Flush to graphite */
     if (enable_graphite) {
       printf("Messages:\n%s", utstring_body(statString));
+
+      int nova = 0, sock = -1;
+      struct hostent* result = NULL;
+      struct sockaddr_in sa;
+#ifdef __linux__
+      struct hostent he;
+      char tmpbuf[1024];
+      int local_errno = 0;
+      if (gethostbyname_r(graphite_host, &he, tmpbuf, sizeof(tmpbuf),
+                          &result, &local_errno)) {
+          nova = 1;
+      }
+#else
+      result = gethostbyname(addr);
+#endif
+      if (result == NULL || result->h_addr_list[0] == NULL ||
+          result->h_length != 4) {
+          nova = 1;
+      }
+
+      /* h_addr_list[0] is raw memory */
+      uint32_t* ip = (uint32_t*) result->h_addr_list[0];
+   
+      if (!nova) { 
+        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (sock == -1) {
+            nova = 1;
+        }
+      }
+
+      if (!nova) {
+        memset(&sa, 0, sizeof(struct sockaddr_in));
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons(port);
+        memcpy(&(sa.sin_addr), &ip, sizeof(ip));
+      }
+
+      if (!nova) {
+        connect(sock, (struct sockaddr *)&ip, sizeof(ip));
+        send(sock, utstring_body(statString), utstring_len(statString), 0);
+        close(sock);
+      }
     }
 
     if (enable_gmetric) {
