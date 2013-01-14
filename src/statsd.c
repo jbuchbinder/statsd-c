@@ -1273,7 +1273,7 @@ void p_thread_flush(void *ptr) {
           nova = 1;
       }
 #else
-      result = gethostbyname(addr);
+      result = gethostbyname(graphite_host);
 #endif
       if (result == NULL || result->h_addr_list[0] == NULL ||
           result->h_length != 4) {
