@@ -75,6 +75,6 @@ An example of some different inputs would be:
 * Set a timer:
 
 ```
-    {'timer':'test_timer',value:12345}
+    {'timer':'test_timer','value':12345}
 ```
 
