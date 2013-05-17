@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2008-2013, Troy D. Hanson   http://uthash.sourceforge.net
+Copyright (c) 2008-2013, Troy D. Hanson   http://troydhanson.github.com/uthash/
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -22,12 +22,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 /* a dynamic string implementation using macros 
- * see http://uthash.sourceforge.net/utstring
  */
 #ifndef UTSTRING_H
 #define UTSTRING_H
 
-#define UTSTRING_VERSION 1.9.7
+#define UTSTRING_VERSION 1.9.8
 
 #ifdef __GNUC__
 #define _UNUSED_ __attribute__ ((__unused__)) 
@@ -156,7 +155,7 @@ _UNUSED_ static void utstring_printf(UT_string *s, const char *fmt, ...) {
 /* Build KMP table from left to right. */
 _UNUSED_ static void _utstring_BuildTable(
     const char *P_Needle, 
-    unsigned int P_NeedleLen, 
+    size_t P_NeedleLen, 
     long *P_KMP_Table)
 {
     long i, j;
@@ -164,7 +163,7 @@ _UNUSED_ static void _utstring_BuildTable(
     i = 0;
     j = i - 1;
     P_KMP_Table[i] = j;
-    while (i < (long)P_NeedleLen)
+    while (i < P_NeedleLen)
     {
         while ( (j > -1) && (P_Needle[i] != P_Needle[j]) )
         {
@@ -172,7 +171,7 @@ _UNUSED_ static void _utstring_BuildTable(
         }
         i++;
         j++;
-        if (i < (long)P_NeedleLen)
+        if (i < P_NeedleLen)
         {
             if (P_Needle[i] == P_Needle[j])
             {
@@ -196,7 +195,7 @@ _UNUSED_ static void _utstring_BuildTable(
 /* Build KMP table from right to left. */
 _UNUSED_ static void _utstring_BuildTableR(
     const char *P_Needle, 
-    unsigned int P_NeedleLen, 
+    size_t P_NeedleLen, 
     long *P_KMP_Table)
 {
     long i, j;
@@ -206,7 +205,7 @@ _UNUSED_ static void _utstring_BuildTableR(
     P_KMP_Table[i + 1] = j;
     while (i >= 0)
     {
-        while ( (j < (long)P_NeedleLen) && (P_Needle[i] != P_Needle[j]) )
+        while ( (j < P_NeedleLen) && (P_Needle[i] != P_Needle[j]) )
         {
            j = P_KMP_Table[j + 1];
         }
@@ -241,7 +240,7 @@ _UNUSED_ static long _utstring_find(
     size_t P_NeedleLen, 
     long *P_KMP_Table)
 {
-    int i, j;
+    long i, j;
     long V_FindPosition = -1;
 
     /* Search from left to right. */
@@ -274,7 +273,7 @@ _UNUSED_ static long _utstring_findR(
     size_t P_NeedleLen, 
     long *P_KMP_Table)
 {
-    int i, j;
+    long i, j;
     long V_FindPosition = -1;
 
     /* Search from right to left. */
