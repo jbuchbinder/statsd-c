@@ -61,7 +61,7 @@
 #include "counters.h"
 #include "gauges.h"
 #include "strings.h"
-#include "embeddedgmetric.h"
+#include "embeddedgmetric/embeddedgmetric.h"
 
 #define LOCK_FILE "/tmp/statsd.lock"
 
