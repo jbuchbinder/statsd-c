@@ -456,9 +456,13 @@ void update_stat( char *group, char *key, char *value ) {
   if (s) {
     syslog(LOG_DEBUG, "Updating old stat entry");
 
+#ifndef LOCK_OPTIMIZE
     wait_for_stats_lock();
+#endif /* !LOCK_OPTIMIZE */
     s->value = atol( value );
+#ifndef LOCK_OPTIMIZE
     remove_stats_lock();
+#endif /* !LOCK_OPTIMIZE */
   } else {
     syslog(LOG_DEBUG, "Adding new stat entry");
     s = malloc(sizeof(statsd_stat_t));
@@ -482,13 +486,21 @@ void update_counter( char *key, double value, double sample_rate ) {
   if (c) {
     syslog(LOG_DEBUG, "Updating old counter entry");
     if (sample_rate == 0) {
+#ifndef LOCK_OPTIMIZE
       wait_for_counters_lock();
+#endif /* !LOCK_OPTIMIZE */
       c->value = c->value + value;
+#ifndef LOCK_OPTIMIZE
       remove_counters_lock();
+#endif /* !LOCK_OPTIMIZE */
     } else {
+#ifndef LOCK_OPTIMIZE
       wait_for_counters_lock();
+#endif /* !LOCK_OPTIMIZE */
       c->value = c->value + ( value * ( 1 / sample_rate ) );
+#ifndef LOCK_OPTIMIZE
       remove_counters_lock();
+#endif /* !LOCK_OPTIMIZE */
     }
   } else {
     syslog(LOG_DEBUG, "Adding new counter entry");
@@ -516,9 +528,13 @@ void update_gauge( char *key, double value ) {
   syslog(LOG_DEBUG, "after HASH_FIND_STR '%s'\n", key);
   if (g) {
     syslog(LOG_DEBUG, "Updating old timer entry");
+#ifndef LOCK_OPTIMIZE
     wait_for_gauges_lock();
+#endif /* !LOCK_OPTIMIZE */
     g->value = value;
+#ifndef LOCK_OPTIMIZE
     remove_gauges_lock();
+#endif /* !LOCK_OPTIMIZE */
   } else {
     syslog(LOG_DEBUG, "Adding new timer entry");
     g = malloc(sizeof(statsd_gauge_t));
@@ -540,10 +556,14 @@ void update_timer( char *key, double value ) {
   syslog(LOG_DEBUG, "after HASH_FIND_STR '%s'\n", key);
   if (t) {
     syslog(LOG_DEBUG, "Updating old timer entry");
+#ifndef LOCK_OPTIMIZE
     wait_for_timers_lock();
+#endif /* !LOCK_OPTIMIZE */
     utarray_push_back(t->values, &value);
     t->count++;
+#ifndef LOCK_OPTIMIZE
     remove_timers_lock();
+#endif /* !LOCK_OPTIMIZE */
   } else {
     syslog(LOG_DEBUG, "Adding new timer entry");
     t = malloc(sizeof(statsd_timer_t));

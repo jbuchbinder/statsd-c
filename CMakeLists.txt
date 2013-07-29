@@ -30,6 +30,8 @@ check_include_files ( signal.h HAVE_SIGNAL_H )
 check_include_files ( netdb.h HAVE_NETDB_H )
 check_function_exists ( vasprintf HAVE_VASPRINTF )
 
+option(LOCK_OPTIMIZE "LockOptimize" OFF)
+
 # Platform specific options
 if ( ${CMAKE_SYSTEM} MATCHES "Linux" )
 	set ( CMAKE_C_FLAGS "-Wno-format-security -Wno-int-to-pointer-cast -Isrc/json-c -Isrc/embeddedgmetric -fPIC -pthread" )

@@ -1,4 +1,4 @@
 language: c
-script: "cmake . && make all"
+script: "cmake . && make all ; make clean ; cmake -DLOCK_OPTIMIZE=ON . && make all"
 before_script:
   - sudo apt-get install cmake
