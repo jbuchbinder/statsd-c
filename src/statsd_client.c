@@ -47,10 +47,10 @@ int main(int argc, char *argv[]) {
   char *host = NULL, *counter = NULL, *timer = NULL;
   uint32_t *ip;
   long value;
-  int port = 8125, sample_rate = 1, performance_test = 0;
+  int port = 8125, sample_rate = 1, performance_test = 0, performance_test_iterations = 10000;
 
   int opt;
-  while ((opt = getopt(argc, argv, "hH:p:c:v:t:s:P")) != -1) {
+  while ((opt = getopt(argc, argv, "hH:p:c:v:t:s:Pi:")) != -1) {
     switch (opt) {
       case 'h':
         usage(argv);
@@ -79,6 +79,9 @@ int main(int argc, char *argv[]) {
         break;
       case 'P':
         performance_test = 1;
+        break;
+      case 'i':
+        performance_test_iterations = atoi(optarg);
         break;
     }
   }
@@ -109,7 +112,7 @@ int main(int argc, char *argv[]) {
     int err = 0;
     int iter;
     starting_time = get_time();
-    for (iter=0; iter<10000; iter++) {
+    for (iter=0; iter<performance_test_iterations; iter++) {
       if (!sendto(s, (char*) buf, strlen(buf), 0, (struct sockaddr*) sa, sizeof(struct sockaddr_in))) {
         err++;
       }
@@ -148,7 +151,7 @@ uint32_t *resolve_host(const char *addr) {
 }
 
 void usage(char *argv[]) {
-  fprintf(stderr, "Usage: %s [-hP] [-H host] [-p port] [-c counter] [-t timer] [-v value]\n", argv[0]);
+  fprintf(stderr, "Usage: %s [-hP] [-H host] [-p port] [-c counter] [-t timer] [-v value] [-i iterations]\n", argv[0]);
   fprintf(stderr, "\t-h               This help screen\n");
   fprintf(stderr, "\t-H host          Destination statsd server name/ip\n");
   fprintf(stderr, "\t-p port          Destination statsd server port (defaults to 8125)\n");
@@ -156,6 +159,7 @@ void usage(char *argv[]) {
   fprintf(stderr, "\t-t timer         Timer name (required, or counter)\n");
   fprintf(stderr, "\t-v value         Value (required)\n");
   fprintf(stderr, "\t-P               Performance testing mode (disabled by default)\n");
+  fprintf(stderr, "\t-i iterations    Performance test iterations (defaults to 10000)\n");
   fprintf(stderr, "\nBoth a counter and timer cannot exist at the same time.\n");
 }
 
