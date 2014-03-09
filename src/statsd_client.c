@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
   struct sockaddr_in *sa;
 
   char buf[1024];
-  char *host = NULL, *counter = NULL, *timer = NULL;
+  char *host = "127.0.0.1", *counter = NULL, *timer = NULL;
   uint32_t net_ip;
   long value;
   int port = 8125, sample_rate = 1, performance_test = 0, performance_test_iterations = 10000;
@@ -155,7 +155,7 @@ uint32_t resolve_host(const char *addr) {
 void usage(char *argv[]) {
   fprintf(stderr, "Usage: %s [-hP] [-H host] [-p port] [-c counter] [-t timer] [-v value] [-i iterations]\n", argv[0]);
   fprintf(stderr, "\t-h               This help screen\n");
-  fprintf(stderr, "\t-H host          Destination statsd server name/ip\n");
+  fprintf(stderr, "\t-H host          Destination statsd server name/ip (default 127.0.0.1)\n");
   fprintf(stderr, "\t-p port          Destination statsd server port (defaults to 8125)\n");
   fprintf(stderr, "\t-c counter       Counter name (required, or timer)\n");
   fprintf(stderr, "\t-t timer         Timer name (required, or counter)\n");
