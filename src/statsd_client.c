@@ -30,7 +30,7 @@
 #include <time.h>
 #endif
 
-uint32_t *resolve_host(const char *addr);
+uint32_t resolve_host(const char *addr);
 void usage(char *argv[]);
 
 double get_time () {
@@ -45,7 +45,7 @@ int main(int argc, char *argv[]) {
 
   char buf[1024];
   char *host = NULL, *counter = NULL, *timer = NULL;
-  uint32_t *ip;
+  uint32_t net_ip;
   long value;
   int port = 8125, sample_rate = 1, performance_test = 0, performance_test_iterations = 10000;
 
@@ -101,12 +101,12 @@ int main(int argc, char *argv[]) {
 
   /* Send message */
   int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  ip = resolve_host(host);
+  net_ip = resolve_host(host);
   sa = malloc(sizeof(struct sockaddr_in *));
 /*  memset(&sa, 0, sizeof(struct sockaddr_in)); */
   sa->sin_family = AF_INET;
   sa->sin_port = htons(port);
-  memcpy(&sa->sin_addr, &ip, sizeof(ip));
+  memcpy(&sa->sin_addr, &net_ip, sizeof(net_ip));
   if (performance_test) {
     double starting_time, ending_time;
     int err = 0;
@@ -128,7 +128,10 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-uint32_t *resolve_host(const char *addr) {
+/*
+ * Resolves the given name and returns the ip in network format.
+ */
+uint32_t resolve_host(const char *addr) {
     struct hostent* result = NULL;
 #ifdef __linux__
     struct hostent he;
@@ -146,8 +149,7 @@ uint32_t *resolve_host(const char *addr) {
         return 0;
     }
 
-    uint32_t* ip = (uint32_t*) result->h_addr_list[0];
-    return ip;
+    return *(uint32_t*) result->h_addr_list[0];
 }
 
 void usage(char *argv[]) {
