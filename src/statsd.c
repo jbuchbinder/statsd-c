@@ -242,13 +242,14 @@ void daemonize_server() {
 
 void syntax(char *argv[]) {
   fprintf(stderr, "statsd-c version %s\nhttps://github.com/jbuchbinder/statsd-c\n\n", STATSD_VERSION);
-  fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile] [-T percentiles]\n", argv[0]);
+  fprintf(stderr, "Usage: %s [-hDdfFc] [-p port] [-m port] [-s file] [-G host] [-g port] [-S spoofhost] [-P prefix] [-l lockfile] [-T percentiles] [-R host] [-r port]\n", argv[0]);
   fprintf(stderr, "\t-p port           set statsd udp listener port (default 8125)\n");
   fprintf(stderr, "\t-m port           set statsd management port (default 8126)\n");
   fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
   fprintf(stderr, "\t-G host           ganglia host (default disabled)\n");
   fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
   fprintf(stderr, "\t-R host           graphite host (default disabled)\n");
+  fprintf(stderr, "\t-r port           graphite port (default 2003)\n");
   fprintf(stderr, "\t-S spoofhost      ganglia spoof host (default statsd:statsd)\n");
   fprintf(stderr, "\t-P prefix         ganglia metric prefix (default is none)\n");
   fprintf(stderr, "\t-l lockfile       lock file (only used when daemonizing)\n");
@@ -278,7 +279,7 @@ int main(int argc, char *argv[]) {
 
   queue_init();
 
-  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:P:l:T:R:")) != -1) {
+  while ((opt = getopt(argc, argv, "dDfhp:m:s:cg:G:F:S:P:l:T:R:r:")) != -1) {
     switch (opt) {
       case 'd':
         printf("Debug enabled.\n");
@@ -316,6 +317,10 @@ int main(int argc, char *argv[]) {
         graphite_host = strdup(optarg);
         enable_graphite = 1;
         printf("Graphite host %s\n", graphite_host);
+        break;
+      case 'r':
+        graphite_port = atoi(optarg);
+        printf("Graphite port %d\n", graphite_port);
         break;
       case 'G':
         ganglia_host = strdup(optarg);
@@ -1313,7 +1318,7 @@ void p_thread_flush(void *ptr) {
       if (!nova) {
         memset(&sa, 0, sizeof(struct sockaddr_in));
         sa.sin_family = AF_INET;
-        sa.sin_port = htons(port);
+        sa.sin_port = htons(graphite_port);
         memcpy(&(sa.sin_addr), &ip, sizeof(ip));
       }
 
