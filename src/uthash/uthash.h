@@ -254,7 +254,7 @@ do {                                                                            
 #define HASH_ADD_STR(head,strfield,add)                                          \
     HASH_ADD(hh,head,strfield[0],strlen(add->strfield),add)
 #define HASH_REPLACE_STR(head,strfield,add,replaced)                             \
-  HASH_REPLACE(hh,head,strfield,strlen(add->strfield),add,replaced)
+    HASH_REPLACE(hh,head,strfield[0],strlen(add->strfield),add,replaced)
 #define HASH_FIND_INT(head,findint,out)                                          \
     HASH_FIND(hh,head,findint,sizeof(int),out)
 #define HASH_ADD_INT(head,intfield,add)                                          \
@@ -351,13 +351,13 @@ do {                                                                            
 #define HASH_FCN HASH_JEN
 #endif
 
-/* The Bernstein hash function, used in Perl prior to v5.6 */
+/* The Bernstein hash function, used in Perl prior to v5.6. Note (x<<5+x)=x*33. */
 #define HASH_BER(key,keylen,num_bkts,hashv,bkt)                                  \
 do {                                                                             \
   unsigned _hb_keylen=keylen;                                                    \
   char *_hb_key=(char*)(key);                                                    \
   (hashv) = 0;                                                                   \
-  while (_hb_keylen--)  { (hashv) = ((hashv) * 33) + *_hb_key++; }               \
+  while (_hb_keylen--)  { (hashv) = (((hashv) << 5) + (hashv)) + *_hb_key++; }   \
   bkt = (hashv) & (num_bkts-1);                                                  \
 } while (0)
 
@@ -373,14 +373,15 @@ do {                                                                            
       hashv ^= (hashv << 5) + (hashv >> 2) + _hs_key[_sx_i];                     \
   bkt = hashv & (num_bkts-1);                                                    \
 } while (0)
-
+/* FNV-1a variation */
 #define HASH_FNV(key,keylen,num_bkts,hashv,bkt)                                  \
 do {                                                                             \
   unsigned _fn_i;                                                                \
   char *_hf_key=(char*)(key);                                                    \
   hashv = 2166136261UL;                                                          \
   for(_fn_i=0; _fn_i < keylen; _fn_i++)                                          \
-      hashv = (hashv * 16777619) ^ _hf_key[_fn_i];                               \
+      hashv = hashv ^ _hf_key[_fn_i];                                            \
+      hashv = hashv * 16777619;                                                  \
   bkt = hashv & (num_bkts-1);                                                    \
 } while(0) 
  
