@@ -726,7 +726,7 @@ void process_stats_packet(char buf_in[]) {
           subtoken = strtok_r(fields, "|", &subsave);
           if (subtoken == NULL) { break; }
           syslog(LOG_DEBUG, "\t\tsubtoken = %s\n", subtoken);
-  
+
           switch (j) {
             case 1:
               syslog(LOG_DEBUG, "case 1");
@@ -793,7 +793,7 @@ void process_stats_packet(char buf_in[]) {
 
   syslog(LOG_DEBUG, "freeing key and value");
   if (key_name) free(key_name);
-      
+
   UPDATE_LAST_MSG_SEEN()
 }
 
@@ -856,7 +856,7 @@ void p_thread_udp(void *ptr) {
         /* make sure that the buf_in is NULL terminated */
         buf_in[BUFLEN - 1] = 0;
 
-        syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n", 
+        syslog(LOG_DEBUG, "UDP: Received packet from %s:%d\nData: %s\n\n",
             inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf_in);
 
         char *packet = strdup(buf_in);
@@ -917,7 +917,7 @@ void p_thread_mgmt(void *ptr) {
 
   FD_ZERO(&master);
   FD_ZERO(&read_fds);
- 
+
   if((stats_mgmt_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
   {
     perror("socke) error");
@@ -928,27 +928,27 @@ void p_thread_mgmt(void *ptr) {
     perror("setsockopt error");
     exit(1);
   }
- 
+
   /* bind */
   serveraddr.sin_family = AF_INET;
   serveraddr.sin_addr.s_addr = INADDR_ANY;
   serveraddr.sin_port = htons(mgmt_port);
   memset(&(serveraddr.sin_zero), '\0', 8);
- 
+
   if(bind(stats_mgmt_socket, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) == -1) {
     exit(1);
   }
- 
+
   if(listen(stats_mgmt_socket, 10) == -1) {
     exit(1);
   }
- 
+
   FD_SET(stats_mgmt_socket, &master);
   fdmax = stats_mgmt_socket;
- 
+
   for(;;) {
     read_fds = master;
- 
+
     if(select(fdmax+1, &read_fds, NULL, NULL, NULL) == -1) {
       perror("select error");
       exit(1);
@@ -978,7 +978,7 @@ void p_thread_mgmt(void *ptr) {
             } else {
               perror("recv() error");
             }
- 
+
             close(i);
             FD_CLR(i, &master);
           } else {
@@ -1307,8 +1307,8 @@ void p_thread_flush(void *ptr) {
 
       /* h_addr_list[0] is raw memory */
       uint32_t* ip = (uint32_t*) result->h_addr_list[0];
-   
-      if (!nova) { 
+
+      if (!nova) {
         sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (sock == -1) {
             nova = 1;
