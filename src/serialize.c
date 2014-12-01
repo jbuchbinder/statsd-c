@@ -133,7 +133,7 @@ int statsd_serialize( char *filename ) {
   FILE *fp;
 
   json_object *obj = json_object_new_object();
-  
+
   json_object *obj_stats = json_object_new_object();
   {
     wait_for_stats_lock();
