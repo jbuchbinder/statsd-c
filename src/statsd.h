@@ -9,7 +9,7 @@
 #ifndef STATSD_H
 #define STATSD_H 1
 
-#define BUFLEN 1024
+#define BUFLEN 65536
 
 /* Default statsd ports */
 #define PORT 8125
