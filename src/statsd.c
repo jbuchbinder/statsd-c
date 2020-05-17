@@ -248,8 +248,8 @@ void syntax(char *argv[]) {
   fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
   fprintf(stderr, "\t-G host           ganglia host (default disabled)\n");
   fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
-  fprintf(stderr, "\t-R host           graphite host (default disabled)\n");
-  fprintf(stderr, "\t-r port           graphite port (default 2003)\n");
+  fprintf(stderr, "\t-R ipv4           graphite ip address  (default disabled)\n");
+  fprintf(stderr, "\t-r port           graphite port (default 2003), TCP (not UDP)\n");
   fprintf(stderr, "\t-S spoofhost      ganglia spoof host (default statsd:statsd)\n");
   fprintf(stderr, "\t-P prefix         ganglia metric prefix (default is none)\n");
   fprintf(stderr, "\t-l lockfile       lock file (only used when daemonizing)\n");
@@ -1285,11 +1285,12 @@ void p_thread_flush(void *ptr) {
     /* TODO: Flush to graphite */
     if (enable_graphite) {
       printf("Messages:\n%s", utstring_body(statString));
-
       int nova = 0, sock = -1;
       struct hostent* result = NULL;
       struct sockaddr_in sa;
-#ifdef __linux__
+      memset(&sa, 0, sizeof(struct sockaddr_in));
+      /* gethostbyname is absolete, we should use getaddrinfo(), but I don't know how (yet) - Marian */
+/*#ifdef __linux__
       struct hostent he;
       char tmpbuf[1024];
       int local_errno = 0;
@@ -1303,29 +1304,31 @@ void p_thread_flush(void *ptr) {
       if (result == NULL || result->h_addr_list[0] == NULL ||
           result->h_length != 4) {
           nova = 1;
-      }
+      }*/
 
       /* h_addr_list[0] is raw memory */
-      uint32_t* ip = (uint32_t*) result->h_addr_list[0];
-
+//      uint32_t* ip = (uint32_t*) result->h_addr_list[0];
+      if( inet_pton( AF_INET, graphite_host, & sa.sin_addr ) <= 0 ) {
+		  nova = 1;
+		  perror( "inet_pton() ERROR" );
+		  printf("graphite won't work!\n");
+	  }
       if (!nova) {
-        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (sock == -1) {
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock < 0) {
             nova = 1;
+            printf("graphite won't work!\n");
         }
       }
-
       if (!nova) {
-        memset(&sa, 0, sizeof(struct sockaddr_in));
         sa.sin_family = AF_INET;
         sa.sin_port = htons(graphite_port);
-        memcpy(&(sa.sin_addr), &ip, sizeof(ip));
-      }
-
-      if (!nova) {
-        connect(sock, (struct sockaddr *)&ip, sizeof(ip));
-        send(sock, utstring_body(statString), utstring_len(statString), 0);
+        connect(sock, (struct sockaddr *)&sa, sizeof(sa));
+        send(sock, utstring_body(statString), utstring_len(statString), 0);        
         close(sock);
+        char flush_time[12]={};
+		sprintf(flush_time, "%ld", time(NULL));
+		update_stat( "graphite", "last_flush", flush_time );
       }
     }
 
