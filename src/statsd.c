@@ -772,8 +772,9 @@ void process_stats_packet(char buf_in[]) {
               value = strtod(subtoken, (char **) NULL);*/
               printf("case 1 subtoken:\t%s\n", subtoken);
               sanitize_gaugevalue(subtoken);
-              charvalue = (char*)malloc(strlen(subtoken) + 1);
-              strcpy (charvalue,subtoken);
+//              charvalue = (char*)malloc(strlen(subtoken) + 1);
+//              strcpy (charvalue,subtoken);
+              charvalue = strdup(subtoken);
               printf("case 1 charvalue:\t%s\n", charvalue);
               break;
             case 2:
@@ -836,7 +837,7 @@ void process_stats_packet(char buf_in[]) {
 			free(charvalue);
 		}
       } else {
-        if (s_sample_rate && *s_sample_rate == 'g') {
+        if (s_sample_rate && *s_sample_rate == '@') {
         /* Handle non-timer, as counter */
           sample_rate = strtod( (s_sample_rate + 1), (char **) NULL );
         }
@@ -960,7 +961,7 @@ void p_thread_queue(void *ptr) {
       }
       packet = queue_pop_first();
     }
-    sleep(100);
+    sleep(1);
   }
 
   syslog(LOG_INFO, "Thread[Queue]: Ending thread %d\n", (int) *((int *) ptr));
