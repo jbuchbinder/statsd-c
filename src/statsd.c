@@ -772,9 +772,9 @@ void process_stats_packet(char buf_in[]) {
               value = strtod(subtoken, (char **) NULL);*/
               printf("case 1 subtoken:\t%s\n", subtoken);
               sanitize_gaugevalue(subtoken);
-              charvalue = (char*)malloc(strlen(subtoken) + 1);
-              strcpy (charvalue,subtoken);
-//              charvalue = strdup(subtoken);
+//              charvalue = (char*)malloc(strlen(subtoken) + 1);
+//              strcpy (charvalue,subtoken);
+              charvalue = strdup(subtoken);
               printf("case 1 charvalue:\t%s\n", charvalue);
               break;
             case 2:
@@ -989,12 +989,14 @@ void p_thread_mgmt(void *ptr) {
 
   if((stats_mgmt_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
   {
-    perror("socke) error");
+    perror("socket error");
+    syslog(LOG_ERR, "Could not create socket stats mgmt. EXIT!");
     exit(1);
   }
   if(setsockopt(stats_mgmt_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
   {
     perror("setsockopt error");
+    syslog(LOG_ERR, "Could not set sock opts. EXIT!");
     exit(1);
   }
 
@@ -1393,11 +1395,11 @@ void p_thread_flush(void *ptr) {
         sa.sin_family = AF_INET;
         sa.sin_port = htons(graphite_port);
         connect(sock, (struct sockaddr *)&sa, sizeof(sa));
-        send(sock, utstring_body(statString), utstring_len(statString), 0);        
+        send(sock, utstring_body(statString), utstring_len(statString), 0);
         close(sock);
-//        char flush_time[12]={};
-//		sprintf(flush_time, "%ld", time(NULL));
-//		update_stat( "graphite", "last_flush", flush_time );
+        char flush_time[12]={};
+		sprintf(flush_time, "%ld", time(NULL));
+		update_stat( "graphite", "last_flush", flush_time );
       }
     }
 
