@@ -772,9 +772,9 @@ void process_stats_packet(char buf_in[]) {
               value = strtod(subtoken, (char **) NULL);*/
               printf("case 1 subtoken:\t%s\n", subtoken);
               sanitize_gaugevalue(subtoken);
-//              charvalue = (char*)malloc(strlen(subtoken) + 1);
-//              strcpy (charvalue,subtoken);
-              charvalue = strdup(subtoken);
+              charvalue = (char*)malloc(strlen(subtoken) + 1);
+              strcpy (charvalue,subtoken);
+//              charvalue = strdup(subtoken);
               printf("case 1 charvalue:\t%s\n", charvalue);
               break;
             case 2:
