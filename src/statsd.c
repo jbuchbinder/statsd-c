@@ -761,8 +761,6 @@ void process_stats_packet(char buf_in[]) {
           subtoken = strtok_r(fields, "|", &subsave);
           if (subtoken == NULL) { break; }
           syslog(LOG_DEBUG, "\t\tsubtoken = %s\n", subtoken);
-          printf("przedswitch subtoken:\t%s\n", subtoken);
-          printf("przedswitch charvalue:\t%s\n", subtoken);
           switch (j) {
             case 1:
               syslog(LOG_DEBUG, "case 1");
@@ -770,12 +768,10 @@ void process_stats_packet(char buf_in[]) {
               sanitize_value(subtoken);
               printf("case 1 subtoken po sanitize:\t%s\n", subtoken);
               value = strtod(subtoken, (char **) NULL);*/
-              printf("case 1 subtoken:\t%s\n", subtoken);
               sanitize_gaugevalue(subtoken);
 //              charvalue = (char*)malloc(strlen(subtoken) + 1);
 //              strcpy (charvalue,subtoken);
               charvalue = strdup(subtoken);
-              printf("case 1 charvalue:\t%s\n", charvalue);
               break;
             case 2:
               syslog(LOG_DEBUG, "case 2");
