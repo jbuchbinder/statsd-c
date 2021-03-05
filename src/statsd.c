@@ -97,6 +97,7 @@ void add_timer( char *key, double value );
 void update_stat( char *group, char *key, char *value);
 void update_counter( char *key, double value, double sample_rate );
 void update_gauge( char *key, double value );
+void update_gauge_plusminus( char *key, double value, int plusminus );
 void update_timer( char *key, double value );
 void process_stats_packet(char buf_in[]);
 void process_json_stats_packet(char buf_in[]);
@@ -248,8 +249,8 @@ void syntax(char *argv[]) {
   fprintf(stderr, "\t-s file           serialize state to and from file (default disabled)\n");
   fprintf(stderr, "\t-G host           ganglia host (default disabled)\n");
   fprintf(stderr, "\t-g port           ganglia port (default 8649)\n");
-  fprintf(stderr, "\t-R host           graphite host (default disabled)\n");
-  fprintf(stderr, "\t-r port           graphite port (default 2003)\n");
+  fprintf(stderr, "\t-R ipv4           graphite ip address  (default disabled)\n");
+  fprintf(stderr, "\t-r port           graphite port (default 2003), TCP (not UDP)\n");
   fprintf(stderr, "\t-S spoofhost      ganglia spoof host (default statsd:statsd)\n");
   fprintf(stderr, "\t-P prefix         ganglia metric prefix (default is none)\n");
   fprintf(stderr, "\t-l lockfile       lock file (only used when daemonizing)\n");
@@ -525,6 +526,40 @@ void update_counter( char *key, double value, double sample_rate ) {
   }
 }
 
+void update_gauge_plusminus( char *key, double value, int plusminus ) {
+  syslog(LOG_DEBUG, "update_gauge %s, %f, %d, where 0 - value; 1 - subtract; 2 - add\n", key, value, plusminus);
+  statsd_gauge_t *g;
+  syslog(LOG_DEBUG, "HASH_FIND_STR '%s'\n", key);
+  HASH_FIND_STR( gauges, key, g );
+  syslog(LOG_DEBUG, "after HASH_FIND_STR '%s'\n", key);
+  if (g) {
+    syslog(LOG_DEBUG, "Updating old timer entry");
+#ifndef LOCK_OPTIMIZE
+    wait_for_gauges_lock();
+#endif /* !LOCK_OPTIMIZE */
+	if (plusminus < 1) g->value = value;
+	else if (plusminus < 2) g->value = g->value - value;
+	else if (plusminus < 3) g->value = g->value + value;
+	else syslog(LOG_ERR, "Error updating gauge!");
+#ifndef LOCK_OPTIMIZE
+    remove_gauges_lock();
+#endif /* !LOCK_OPTIMIZE */
+  } else {
+    syslog(LOG_DEBUG, "Adding new timer entry");
+    g = malloc(sizeof(statsd_gauge_t));
+
+    strcpy(g->key, key);
+	if (plusminus < 1) g->value = value;
+	else if (plusminus < 2) g->value = 0 - value;
+	else if (plusminus < 3) g->value = 0 + value;
+	else syslog(LOG_ERR, "Error updating gauge!");
+
+    wait_for_gauges_lock();
+    HASH_ADD_STR( gauges, key, g );
+    remove_gauges_lock();
+  }
+}
+
 void update_gauge( char *key, double value ) {
   syslog(LOG_DEBUG, "update_gauge ( %s, %f )\n", key, value);
   statsd_gauge_t *g;
@@ -695,7 +730,7 @@ void process_stats_packet(char buf_in[]) {
     return;
   }
 
-  char *save, *subsave, *token, *subtoken, *bits, *fields;
+  char *save, *subsave, *token, *subtoken, *bits, *fields, *charvalue;
   double value = 1.0;
 
   int i;
@@ -726,12 +761,17 @@ void process_stats_packet(char buf_in[]) {
           subtoken = strtok_r(fields, "|", &subsave);
           if (subtoken == NULL) { break; }
           syslog(LOG_DEBUG, "\t\tsubtoken = %s\n", subtoken);
-
           switch (j) {
             case 1:
               syslog(LOG_DEBUG, "case 1");
+/*              printf("case 1 subtoken przed sanitize:\t%s\n", subtoken);
               sanitize_value(subtoken);
-              value = strtod(subtoken, (char **) NULL);
+              printf("case 1 subtoken po sanitize:\t%s\n", subtoken);
+              value = strtod(subtoken, (char **) NULL);*/
+              sanitize_gaugevalue(subtoken);
+//              charvalue = (char*)malloc(strlen(subtoken) + 1);
+//              strcpy (charvalue,subtoken);
+              charvalue = strdup(subtoken);
               break;
             case 2:
               syslog(LOG_DEBUG, "case 2");
@@ -763,17 +803,42 @@ void process_stats_packet(char buf_in[]) {
 
       if (is_timer == 1) {
         /* ms passed, handle timer */
+        sanitize_value(charvalue);
+        value = strtod(charvalue, (char **) NULL);
         update_timer( key_name, value );
       } else if (is_gauge == 1) {
         /* Handle non-timer, as gauge */
-        update_gauge(key_name, value);
         syslog(LOG_DEBUG, "Found gauge key name '%s'\n", key_name);
         syslog(LOG_DEBUG, "Found gauge value '%f'\n", value);
+        if (*charvalue == '-') {
+			charvalue++;
+			sanitize_value(charvalue);
+			value = strtod(charvalue, (char **) NULL);
+			update_gauge_plusminus(key_name, value, 1);
+			charvalue--;
+			free(charvalue);
+		}
+		else if (*charvalue == '+') {
+			charvalue++;
+			sanitize_value(charvalue);
+			value = strtod(charvalue, (char **) NULL);
+			update_gauge_plusminus(key_name, value, 2);
+			charvalue--;
+			free(charvalue);
+		}
+		else {
+			sanitize_value(charvalue);
+			value = strtod(charvalue, (char **) NULL);
+			update_gauge_plusminus(key_name, value, 0);
+			free(charvalue);
+		}
       } else {
-        if (s_sample_rate && *s_sample_rate == 'g') {
+        if (s_sample_rate && *s_sample_rate == '@') {
         /* Handle non-timer, as counter */
           sample_rate = strtod( (s_sample_rate + 1), (char **) NULL );
         }
+        sanitize_value(charvalue);
+        value = strtod(charvalue, (char **) NULL);
         update_counter(key_name, value, sample_rate);
         syslog(LOG_DEBUG, "Found key name '%s'\n", key_name);
         syslog(LOG_DEBUG, "Found value '%f'\n", value);
@@ -892,7 +957,7 @@ void p_thread_queue(void *ptr) {
       }
       packet = queue_pop_first();
     }
-    sleep(100);
+    sleep(1);
   }
 
   syslog(LOG_INFO, "Thread[Queue]: Ending thread %d\n", (int) *((int *) ptr));
@@ -920,12 +985,14 @@ void p_thread_mgmt(void *ptr) {
 
   if((stats_mgmt_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
   {
-    perror("socke) error");
+    perror("socket error");
+    syslog(LOG_ERR, "Could not create socket stats mgmt. EXIT!");
     exit(1);
   }
   if(setsockopt(stats_mgmt_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1)
   {
     perror("setsockopt error");
+    syslog(LOG_ERR, "Could not set sock opts. EXIT!");
     exit(1);
   }
 
@@ -1285,11 +1352,12 @@ void p_thread_flush(void *ptr) {
     /* TODO: Flush to graphite */
     if (enable_graphite) {
       printf("Messages:\n%s", utstring_body(statString));
-
       int nova = 0, sock = -1;
       struct hostent* result = NULL;
       struct sockaddr_in sa;
-#ifdef __linux__
+      memset(&sa, 0, sizeof(struct sockaddr_in));
+      /* gethostbyname is absolete, we should use getaddrinfo(), but I don't know how (yet) - Marian */
+/*#ifdef __linux__
       struct hostent he;
       char tmpbuf[1024];
       int local_errno = 0;
@@ -1303,29 +1371,31 @@ void p_thread_flush(void *ptr) {
       if (result == NULL || result->h_addr_list[0] == NULL ||
           result->h_length != 4) {
           nova = 1;
-      }
+      }*/
 
       /* h_addr_list[0] is raw memory */
-      uint32_t* ip = (uint32_t*) result->h_addr_list[0];
-
+//      uint32_t* ip = (uint32_t*) result->h_addr_list[0];
+      if( inet_pton( AF_INET, graphite_host, & sa.sin_addr ) <= 0 ) {
+		  nova = 1;
+		  perror( "inet_pton() ERROR" );
+		  printf("graphite won't work!\n");
+	  }
       if (!nova) {
-        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (sock == -1) {
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock < 0) {
             nova = 1;
+            printf("graphite won't work!\n");
         }
       }
-
       if (!nova) {
-        memset(&sa, 0, sizeof(struct sockaddr_in));
         sa.sin_family = AF_INET;
         sa.sin_port = htons(graphite_port);
-        memcpy(&(sa.sin_addr), &ip, sizeof(ip));
-      }
-
-      if (!nova) {
-        connect(sock, (struct sockaddr *)&ip, sizeof(ip));
+        connect(sock, (struct sockaddr *)&sa, sizeof(sa));
         send(sock, utstring_body(statString), utstring_len(statString), 0);
         close(sock);
+        char flush_time[12]={};
+		sprintf(flush_time, "%ld", time(NULL));
+		update_stat( "graphite", "last_flush", flush_time );
       }
     }
 
