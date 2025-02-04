@@ -1,4 +1,4 @@
-cmake_minimum_required ( VERSION 2.8 )
+cmake_minimum_required ( VERSION 3.5 )
 project ( statsd-c )
 
 set ( PACKAGE "statsd-c" )
@@ -55,7 +55,7 @@ option(LOCK_OPTIMIZE "LockOptimize" OFF)
 
 # Platform specific options
 if ( ${CMAKE_SYSTEM} MATCHES "Linux" )
-	set ( CMAKE_C_FLAGS "-Wno-format-security -Wno-int-to-pointer-cast -Isrc/json-c -Isrc/embeddedgmetric -fPIC -pthread" )
+	set ( CMAKE_C_FLAGS "-Wno-format-security -Wno-int-to-pointer-cast -Isrc/json-c -Isrc/embeddedgmetric -fPIC -pthread -I/usr/include/tirpc" )
 endif ( ${CMAKE_SYSTEM} MATCHES "Linux" )
 
 if ( ${CMAKE_SYSTEM} MATCHES "Darwin" )
@@ -97,6 +97,9 @@ add_executable(statsd
 IF (CMAKE_SYSTEM_NAME MATCHES "(Solaris|SunOS)")
   TARGET_LINK_LIBRARIES(statsd nsl socket)
 ENDIF ()
+if ( ${CMAKE_SYSTEM} MATCHES "Linux" )
+  TARGET_LINK_LIBRARIES(statsd tirpc)
+endif ()
 
 # Client binary
 add_executable(statsd_client src/statsd_client.c)
