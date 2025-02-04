@@ -11,6 +11,7 @@
 
 void sanitize_key(char *k);
 void sanitize_value(char *k);
+void sanitize_gaugevalue(char *k);
 void appendstring(char *orig, char *addition);
 char *ltoa(long l);
 char *ldtoa(long double ld);
